@@ -10,8 +10,14 @@ export function ownerScopedTable(table: string) {
   const client = createServiceClient();
   const ownerId = getOwnerId();
   return {
-    select: (columns = "*") =>
-      client.from(table).select(columns).eq("owner_id", ownerId),
+    // `as any` on the columns string sidesteps supabase-js's recursive
+    // select-string type parser, which (without generated Database types)
+    // blows the TS compiler's recursion limit rather than falling back
+    // cleanly. Query results are effectively `any` here — callers own the
+    // shape they expect back.
+    select: (columns: string = "*") =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      client.from(table).select(columns as any).eq("owner_id", ownerId),
     insert: (values: Record<string, unknown> | Record<string, unknown>[]) => {
       const rows = Array.isArray(values) ? values : [values];
       return client

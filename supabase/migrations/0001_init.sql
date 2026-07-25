@@ -5,6 +5,12 @@
 
 create extension if not exists "pgcrypto";
 
+-- Private bucket for original archives (src/lib/storage.ts is the only code
+-- that should touch it — see PLAN.md's storage decision).
+insert into storage.buckets (id, name, public)
+values ('resume-archives', 'resume-archives', false)
+on conflict (id) do nothing;
+
 -- owner_id is a hardcoded constant for the personal MVP (see PLAN.md).
 -- Every table below carries it so RLS policies and the SSO cutover only
 -- ever need to change how owner_id is derived, not the schema.
