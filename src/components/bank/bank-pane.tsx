@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition, type MouseEvent, type PointerEvent } from "react";
 import { useDraggable } from "@dnd-kit/core";
-import { GripVertical } from "lucide-react";
+import { Eye, GripVertical } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -13,32 +13,26 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { parseJakeEntryPreview } from "@/lib/jake-entry-preview";
+import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
+import { sectionGroupLabel } from "@/lib/section-label";
 import type { BankEntryRow } from "@/app/api/entries/route";
 import { BANK_DRAG_PREFIX } from "@/components/dnd-ids";
 
-// source_resume has no user-editable display name yet — the intended
-// design (default to the uploaded file's original name, user-editable
-// afterward) needs a schema field (source_resume.display_name) plus an
-// import-time default and a rename endpoint, none of which exist yet.
-// Until that lands, fall back to a short id so at least entries from
-// different uploads are visually distinguishable. Swap this for the real
-// name once the field exists — see PLAN.md.
-function resumeSourceLabel(sourceResumeId: string | null): string {
-  if (!sourceResumeId) return "source unavailable"; // orphaned entry, see PLAN.md
-  return sourceResumeId.slice(0, 6);
+// The uploaded file's original name (source_resume.display_name), so
+// entries from different uploads read as "Ldgr" / "Dibs" instead of an id
+// fragment. Falls back to a short id for orphaned entries (source_resume_id
+// is ON DELETE SET NULL, see 0001_init.sql) or entries imported before
+// source_resume.display_name existed (0004 migration, backfilled as null).
+const GROUP_PRIORITY = ["education", "experience", "leadership", "projects"];
+function groupPriority(label: string) {
+  const index = GROUP_PRIORITY.indexOf(label.trim().toLowerCase());
+  return index === -1 ? GROUP_PRIORITY.length : index;
 }
 
-// Display-only bucketing for the bank pane's grouping headers and the
-// preview modal title. The underlying entry.source_section is never
-// touched — section titles must stay exact for the composition merge-by-
-// title rule (see PLAN.md) once Phase 5 lands. This just controls what
-// label a section shows as here: anything outside the common four gets
-// grouped under "Other" instead of showing every custom section name
-// (Technical Skills, Languages, Hobbies, Certifications, ...) as its own
-// bucket.
-const KNOWN_SECTIONS = new Set(["education", "experience", "projects", "leadership"]);
-function bankSectionLabel(sectionTitle: string): string {
-  return KNOWN_SECTIONS.has(sectionTitle.trim().toLowerCase()) ? sectionTitle : "Other";
+function resumeSourceLabel(entry: BankEntryRow): string {
+  if (entry.source_resume?.display_name) return entry.source_resume.display_name;
+  if (!entry.source_resume_id) return "source unavailable"; // orphaned entry, see PLAN.md
+  return entry.source_resume_id.slice(0, 6);
 }
 
 export function BankPane({
@@ -63,17 +57,15 @@ export function BankPane({
   // inside the modal itself show up immediately rather than going stale.
   const previewEntry = entries.find((e) => e.id === previewEntryId) ?? null;
 
-  // Grouped by display section, in the order those sections first appear in
-  // `entries` — that's upload/original-resume order (see the API route's
-  // ordering), not alphabetical. Heading order is derived from the full,
-  // unfiltered entry list so it stays put as cards get dragged into the
-  // outline — otherwise a heading whose first (upload-order) entry gets used
-  // would jump to wherever its next-remaining entry happens to be.
+  // Grouped by display section. Within that, group headers follow a fixed
+  // priority — Education, Experience, Leadership, Projects, then Other last
+  // — rather than upload order, so "Other" doesn't end up sitting above a
+  // known section just because its first entry happened to import earlier.
   const groups = useMemo(() => {
     const order: string[] = [];
     const byLabel = new Map<string, BankEntryRow[]>();
     for (const entry of entries) {
-      const label = bankSectionLabel(entry.source_section);
+      const label = sectionGroupLabel(entry.source_section);
       if (!byLabel.has(label)) {
         order.push(label);
         byLabel.set(label, []);
@@ -82,7 +74,8 @@ export function BankPane({
     }
     return order
       .map((label): [string, BankEntryRow[]] => [label, byLabel.get(label)!])
-      .filter(([, group]) => group.length > 0);
+      .filter(([, group]) => group.length > 0)
+      .sort(([a], [b]) => groupPriority(a) - groupPriority(b));
   }, [entries, usedEntryIds]);
 
   async function patchEntry(id: string, values: { displayName?: string; tags?: string[] }) {
@@ -112,7 +105,12 @@ export function BankPane({
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-4 pr-2 pb-4">
+        {/* pr-4, not pr-2 — the scrollbar (base-ui ScrollArea) is an overlay
+            that floats over the viewport rather than reserving its own
+            layout space, so the card list needs enough clearance that the
+            scrollbar's own hit area (w-2.5) doesn't sit on top of card
+            content and steal its hover/click. */}
+        <div className="flex flex-col gap-4 pr-4 pb-4">
           {groups.length === 0 ? (
             <div className="rounded-md border border-dashed border-line-strong p-7 text-center text-[12.5px] text-faint">
               <div className="mb-1.5 font-mono text-[10.5px] uppercase tracking-wide text-muted-fg">
@@ -194,7 +192,7 @@ function EntryPreviewDialog({
       <DialogHeader>
         <DialogTitle className="flex items-baseline gap-2 leading-normal">
           <span className="shrink-0 font-mono text-xs whitespace-nowrap text-muted-fg uppercase tracking-wide">
-            {bankSectionLabel(entry.source_section)}
+            {sectionGroupLabel(entry.source_section)}
           </span>
           <input
             ref={titleInputRef}
@@ -253,7 +251,7 @@ export function BankEntryCardVisual({ entry }: { entry: BankEntryRow }) {
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <span className="w-fit text-[12.5px] font-semibold">{entry.display_name}</span>
           <div className="font-mono text-[10px] text-faint">
-            {resumeSourceLabel(entry.source_resume_id)}
+            {resumeSourceLabel(entry)}
           </div>
         </div>
       </CardContent>
@@ -272,6 +270,7 @@ function EntryCard({
 }) {
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(entry.display_name);
+  const [hovering, setHovering] = useState(false);
 
   function commitName() {
     setEditingName(false);
@@ -288,29 +287,24 @@ function EntryCard({
   });
 
   function onPointerDownGuarded(e: PointerEvent<HTMLDivElement>) {
-    // Don't hijack typing in the name-edit / tag-draft inputs — everything
-    // else on the card (including the name label) can start a drag.
-    if (e.target instanceof HTMLElement && e.target.closest("input")) return;
+    // Don't hijack typing in the name-edit input, or the preview button's
+    // own click — everything else on the card can start a drag.
+    if (e.target instanceof HTMLElement && e.target.closest("input, button")) return;
     listeners?.onPointerDown?.(e);
   }
-  function onClick(e: MouseEvent<HTMLDivElement>) {
-    if (e.target instanceof HTMLElement && e.target.closest("input")) return;
-    onOpenPreview();
-  }
-  function stopCardClick(e: MouseEvent) {
+  function stopPreviewButtonDrag(e: MouseEvent) {
     e.stopPropagation();
   }
 
   // While dragging, the DragOverlay clone (BankEntryCardVisual) is what
   // follows the cursor — this source card just fades in place instead of
   // also tracking the pointer, or the two would visibly move independently.
-  // Cursor is set inline (not just via the cursor-grab/-grabbing classes
-  // below) so it always wins regardless of any other rule targeting this
-  // card — dnd-kit's `attributes` spread includes `role="button"`, and an
-  // inline style can't lose a specificity/layer-order fight the way a class
-  // can.
+  // Write the resting cursor only after pointer-enter. The implementation
+  // before the dnd-kit migration also updated React state on hover; restoring
+  // that DOM update prevents an occasional stale native cursor after Chrome
+  // moves the pointer onto a newly composited card.
   const style = {
-    cursor: isDragging ? "grabbing" : "grab",
+    cursor: isDragging ? "grabbing" : hovering ? "grab" : undefined,
     ...(isDragging ? { opacity: 0.35 } : {}),
   };
 
@@ -323,19 +317,27 @@ function EntryCard({
       // a hard flat offset — that flat-line look is what read as "AI card."
       // Hover only lifts the shadow (no rotation) — the tilt-on-hover read
       // as gimmicky once this became the drag source for a real editor.
-      className={`touch-none select-none ${isDragging ? "z-20 cursor-grabbing shadow-[4px_7px_14px_-2px_rgba(18,24,28,0.28)]" : "z-0 cursor-grab shadow-[0_1px_2px_rgba(18,24,28,0.10)] transition-shadow duration-150 ease-out hover:z-10 hover:shadow-[3px_5px_10px_-2px_rgba(18,24,28,0.22)]"}`}
+      className={`touch-none select-none ${isDragging ? "z-20 cursor-grabbing shadow-[4px_7px_14px_-2px_rgba(18,24,28,0.28)]" : "z-0 cursor-auto shadow-[0_1px_2px_rgba(18,24,28,0.10)] transition-shadow duration-150 ease-out hover:z-10 hover:shadow-[3px_5px_10px_-2px_rgba(18,24,28,0.22)]"}`}
       {...attributes}
       {...listeners}
       onPointerDown={onPointerDownGuarded}
-      onClick={onClick}
+      onPointerEnter={() => {
+        setHovering(true);
+        setHoverCursor("grab");
+      }}
+      onPointerLeave={() => {
+        setHovering(false);
+        clearHoverCursor("grab");
+      }}
     >
-      <CardContent className="flex flex-row items-start gap-2">
+      <CardContent className="pointer-events-none flex flex-row items-start gap-2">
         <GripVertical className="mt-0.5 size-3.5 shrink-0 text-line-strong" />
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           {editingName ? (
             <input
               autoFocus
-              className="border-b border-line-strong bg-transparent text-[12.5px] font-semibold outline-none focus:border-brand"
+              data-cursor-override="text"
+              className="pointer-events-auto cursor-text border-b border-line-strong bg-transparent text-[12.5px] font-semibold outline-none focus:border-brand"
               value={name}
               onChange={(e) => setName(e.target.value)}
               onBlur={commitName}
@@ -349,8 +351,7 @@ function EntryCard({
             />
           ) : (
             <span
-              className="w-fit cursor-grab text-[12.5px] font-semibold"
-              onClick={stopCardClick}
+              className="pointer-events-auto w-fit text-[12.5px] font-semibold"
               onDoubleClick={() => setEditingName(true)}
               title="Double-click to rename"
             >
@@ -358,9 +359,21 @@ function EntryCard({
             </span>
           )}
           <div className="font-mono text-[10px] text-faint">
-            {resumeSourceLabel(entry.source_resume_id)}
+            {resumeSourceLabel(entry)}
           </div>
         </div>
+        {/* Explicit preview action — the card itself is the drag source
+            (grab cursor everywhere), so opening the preview needed its own
+            target instead of overloading a plain click on a draggable. */}
+        <button
+          onClick={onOpenPreview}
+          onPointerDown={stopPreviewButtonDrag}
+          data-cursor-override="pointer"
+          title="Preview"
+          className="pointer-events-auto shrink-0 self-center cursor-pointer rounded-sm p-1 text-faint hover:bg-surface-sunken hover:text-brand"
+        >
+          <Eye className="pointer-events-none size-3.5" />
+        </button>
       </CardContent>
     </Card>
   );

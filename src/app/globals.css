@@ -112,3 +112,28 @@
     @apply font-sans;
   }
 }
+
+/* Chrome can occasionally retain the arrow while moving between composited
+   drag targets even though the target's computed cursor is correct. During
+   these two hover states, force the native cursor across the document so the
+   browser receives one unambiguous cursor update. */
+html[data-hover-cursor="grab"],
+html[data-hover-cursor="grab"] body,
+html[data-hover-cursor="grab"] body * {
+  cursor: grab !important;
+}
+
+html[data-hover-cursor="col-resize"],
+html[data-hover-cursor="col-resize"] body,
+html[data-hover-cursor="col-resize"] body * {
+  cursor: col-resize !important;
+}
+
+html[data-hover-cursor] [data-cursor-override="pointer"],
+html[data-hover-cursor] [data-cursor-override="pointer"] * {
+  cursor: pointer !important;
+}
+
+html[data-hover-cursor] [data-cursor-override="text"] {
+  cursor: text !important;
+}

@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown, ChevronUp, GripVertical, Plus, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
+import { sectionGroupLabel } from "@/lib/section-label";
 import type { BankEntryRow } from "@/app/api/entries/route";
 import { NEW_SECTION_DROP_ID, SECTION_APPEND_PREFIX } from "@/components/dnd-ids";
 
@@ -54,7 +57,10 @@ export function OutlinePane({
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-4 pr-2">
+        {/* pr-4, not pr-2 — see bank-pane.tsx's identical comment: the
+            base-ui ScrollArea's scrollbar overlays content instead of
+            reserving its own layout space. */}
+        <div className="flex flex-col gap-4 pr-4">
           {sections.map((section, index) => (
             <OutlineSection
               key={section.title}
@@ -97,8 +103,12 @@ function OutlineSection({
   return (
     <div>
       <div className="mb-2 flex items-center gap-1.5">
+        {/* Grouping label only (Education/Experience/Projects/Leadership/
+            Other) — same bucketing as the bank pane. The real title
+            (section.title) still drives drag ids, drop targets, and
+            move-up/down; only this heading text is bucketed. */}
         <div className="flex-1 font-mono text-[10.5px] uppercase tracking-wide text-muted-fg">
-          {section.title}
+          {sectionGroupLabel(section.title)}
         </div>
         <div className="ml-auto flex items-center">
           <button
@@ -187,10 +197,15 @@ function OutlineEntry({
   entry: BankEntryRow | undefined;
   onRemove: (sectionTitle: string, entryId: string) => void;
 }) {
+  const [hovering, setHovering] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: entryId,
   });
-  const style = { transform: CSS.Transform.toString(transform), transition };
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    cursor: isDragging ? "grabbing" : hovering ? "grab" : undefined,
+  };
 
   return (
     <div
@@ -198,19 +213,28 @@ function OutlineEntry({
       style={style}
       {...attributes}
       {...listeners}
-      className={`flex touch-none items-center gap-2 rounded-md border border-line bg-surface px-2.5 py-2 text-[12.5px] ${isDragging ? "cursor-grabbing opacity-40" : "cursor-grab"}`}
+      onPointerEnter={() => {
+        setHovering(true);
+        setHoverCursor("grab");
+      }}
+      onPointerLeave={() => {
+        setHovering(false);
+        clearHoverCursor("grab");
+      }}
+      className={`flex touch-none items-center gap-2 rounded-md border border-line bg-surface px-2.5 py-2 text-[12.5px] ${isDragging ? "cursor-grabbing opacity-40" : "cursor-auto"}`}
     >
-      <GripVertical className="size-3.5 shrink-0 text-line-strong" />
-      <span className="min-w-0 flex-1 truncate font-semibold">
+      <GripVertical className="pointer-events-none size-3.5 shrink-0 text-line-strong" />
+      <span className="pointer-events-none min-w-0 flex-1 truncate font-semibold">
         {entry?.display_name ?? "unknown entry"}
       </span>
       <button
         onClick={() => onRemove(sectionTitle, entryId)}
         onPointerDown={(e) => e.stopPropagation()}
-        className="text-faint outline-none hover:text-danger focus-visible:text-danger"
+        data-cursor-override="pointer"
+        className="cursor-pointer text-faint outline-none hover:text-danger focus-visible:text-danger"
         aria-label={`Remove ${entry?.display_name ?? "entry"} from ${sectionTitle}`}
       >
-        <X className="size-3.5" />
+        <X className="pointer-events-none size-3.5" />
       </button>
     </div>
   );

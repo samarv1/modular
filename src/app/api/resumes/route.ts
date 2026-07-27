@@ -14,6 +14,9 @@ export interface ResumeRow {
   title: string;
   template_shell_id: string;
   compile_status: string;
+  folder_id: string | null;
+  position_x: number;
+  position_y: number;
   updated_at: string;
   created_at: string;
 }
@@ -23,7 +26,7 @@ export interface ResumeRow {
 export async function GET() {
   const { data, error } = asRows<ResumeRow>(
     await ownerScopedTable("resume")
-      .select("id, title, template_shell_id, compile_status, updated_at, created_at")
+      .select("id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at")
       .order("created_at", { ascending: true }),
   );
   if (error) throw new Error(error.message);
@@ -37,14 +40,31 @@ export async function GET() {
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const title = typeof body.title === "string" && body.title.trim() ? body.title.trim() : "Untitled resume";
+  // Desktop placement (Phase 6) — the caller (Desktop's "New resume") computes
+  // where the icon should land, and which folder (if any) it should land in;
+  // omitted position defaults to the position_x/position_y column defaults
+  // (0,0), same as any other insert.
+  const position = {
+    positionX: typeof body.positionX === "number" ? body.positionX : undefined,
+    positionY: typeof body.positionY === "number" ? body.positionY : undefined,
+    folderId: body.folderId === null || typeof body.folderId === "string" ? body.folderId : undefined,
+  };
 
   if (typeof body.duplicateFromResumeId === "string") {
-    return duplicateResume(body.duplicateFromResumeId, title);
+    return duplicateResume(body.duplicateFromResumeId, title, position);
   }
-  return createBlankResume(typeof body.templateShellId === "string" ? body.templateShellId : undefined, title);
+  return createBlankResume(
+    typeof body.templateShellId === "string" ? body.templateShellId : undefined,
+    title,
+    position,
+  );
 }
 
-async function createBlankResume(templateShellId: string | undefined, title: string) {
+async function createBlankResume(
+  templateShellId: string | undefined,
+  title: string,
+  position: { positionX?: number; positionY?: number; folderId?: string | null },
+) {
   let shellId = templateShellId;
   if (!shellId) {
     const { data: shell, error: shellError } = asRow<{ id: string }>(
@@ -66,15 +86,25 @@ async function createBlankResume(templateShellId: string | undefined, title: str
 
   const { data, error } = asRow<ResumeRow>(
     await ownerScopedTable("resume")
-      .insert({ title, template_shell_id: shellId })
-      .select("id, title, template_shell_id, compile_status, updated_at, created_at")
+      .insert({
+        title,
+        template_shell_id: shellId,
+        ...(position.positionX !== undefined ? { position_x: position.positionX } : {}),
+        ...(position.positionY !== undefined ? { position_y: position.positionY } : {}),
+        ...(position.folderId !== undefined ? { folder_id: position.folderId } : {}),
+      })
+      .select("id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at")
       .single(),
   );
   if (error) throw new Error(error.message);
   return NextResponse.json({ resume: data }, { status: 201 });
 }
 
-async function duplicateResume(sourceResumeId: string, title: string) {
+async function duplicateResume(
+  sourceResumeId: string,
+  title: string,
+  position: { positionX?: number; positionY?: number; folderId?: string | null },
+) {
   const { data: source, error: sourceError } = asRow<{ id: string; template_shell_id: string }>(
     await ownerScopedTable("resume").select("id, template_shell_id").eq("id", sourceResumeId).maybeSingle(),
   );
@@ -105,8 +135,14 @@ async function duplicateResume(sourceResumeId: string, title: string) {
 
   const { data: newResume, error: createError } = asRow<ResumeRow>(
     await ownerScopedTable("resume")
-      .insert({ title, template_shell_id: source.template_shell_id })
-      .select("id, title, template_shell_id, compile_status, updated_at, created_at")
+      .insert({
+        title,
+        template_shell_id: source.template_shell_id,
+        ...(position.positionX !== undefined ? { position_x: position.positionX } : {}),
+        ...(position.positionY !== undefined ? { position_y: position.positionY } : {}),
+        ...(position.folderId !== undefined ? { folder_id: position.folderId } : {}),
+      })
+      .select("id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at")
       .single(),
   );
   if (createError) throw new Error(createError.message);

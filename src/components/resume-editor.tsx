@@ -14,24 +14,26 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import { Pencil, Plus } from "lucide-react";
+import { Pencil } from "lucide-react";
+import { BackToDesktopLink } from "@/components/back-to-desktop";
 import { BankPane, BankEntryCardVisual } from "@/components/bank/bank-pane";
 import { OutlinePane, type EditorSection } from "@/components/outline/outline-pane";
 import { BANK_DRAG_PREFIX, NEW_SECTION_DROP_ID, SECTION_APPEND_PREFIX } from "@/components/dnd-ids";
 import type { BankEntryRow } from "@/app/api/entries/route";
-import type { ResumeRow } from "@/app/api/resumes/route";
-import type { ResumeSectionRow } from "@/lib/resume-composition-query";
+import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
+import type { ResumeMetaRow, ResumeSectionRow } from "@/lib/resume-composition-query";
 
 // Single current-resume title, click-to-rename. Switching between resumes
-// is a future home page's job (see PLAN.md) — this editor only ever works
-// on one resume at a time, so there's no tab strip to manage here.
+// happens on the home page (src/app/page.tsx) — this editor only ever works
+// on the one resume its route (/resume/[id]) was opened for, so there's no
+// tab strip to manage here.
 function ResumeTitle({
   resume,
   renaming,
   onStartRename,
   onCommitRename,
 }: {
-  resume: ResumeRow;
+  resume: ResumeMetaRow;
   renaming: boolean;
   onStartRename: () => void;
   onCommitRename: (title: string) => void;
@@ -87,22 +89,28 @@ export function ResumeEditor({
   initialEntries,
   initialResume,
   initialSections,
+  initialRenaming = false,
 }: {
   initialEntries: BankEntryRow[];
-  initialResume: ResumeRow | null;
+  initialResume: ResumeMetaRow;
   initialSections: ResumeSectionRow[];
+  initialRenaming?: boolean;
 }) {
   const [entries, setEntries] = useState(initialEntries);
-  // Single current resume — switching between resumes lives on the future
-  // home page (PLAN.md), not here.
+  // Always the resume this route (/resume/[id]) was opened for — switching
+  // resumes happens by navigating, on the home page, not by swapping state
+  // here.
   const [resume, setResume] = useState(initialResume);
   const [sections, setSections] = useState<EditorSection[]>(toEditorSections(initialSections));
   const [addError, setAddError] = useState<string | null>(null);
-  // A freshly-created resume opens straight into rename mode rather than
+  // A freshly-created resume (via the home page's "New resume", which
+  // navigates here with ?new=1) opens straight into rename mode rather than
   // just appearing with the default "Untitled resume" title — that's the
   // signal that you're now working on something new, and gets it named in
   // the same motion instead of leaving the default title to edit later.
-  const [renaming, setRenaming] = useState(false);
+  const [renaming, setRenaming] = useState(initialRenaming);
+
+  useEffect(() => () => clearHoverCursor(), []);
 
   const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries]);
   const usedEntryIds = useMemo(() => new Set(sections.flatMap((s) => s.entries)), [sections]);
@@ -121,7 +129,6 @@ export function ResumeEditor({
       isFirstRender.current = false;
       return;
     }
-    if (!resume) return;
     if (persistTimer.current) clearTimeout(persistTimer.current);
     persistTimer.current = setTimeout(() => {
       fetch(`/api/resumes/${resume.id}/composition`, {
@@ -140,23 +147,10 @@ export function ResumeEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections]);
 
-  async function createResume() {
-    const res = await fetch("/api/resumes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: "Untitled resume" }),
-    });
-    if (!res.ok) return;
-    const { resume: newResume } = await res.json();
-    setResume(newResume);
-    setSections([]); // a fresh blank resume has no composition yet
-    setRenaming(true);
-  }
-
   async function renameResume(title: string) {
     const trimmed = title.trim();
-    if (!trimmed || !resume) return;
-    setResume((cur) => (cur ? { ...cur, title: trimmed } : cur));
+    if (!trimmed) return;
+    setResume((cur) => ({ ...cur, title: trimmed }));
     await fetch(`/api/resumes/${resume.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -168,7 +162,6 @@ export function ResumeEditor({
   // into the section titled `targetSectionTitle` (created if it doesn't
   // exist yet), inserted just before `insertBeforeId` or appended at the end.
   function placeEntry(entry: BankEntryRow, targetSectionTitle: string, insertBeforeId?: string) {
-    if (!resume) return;
     if (usedEntryIds.has(entry.id)) return;
 
     const targetIndex = sections.findIndex((s) => s.title === targetSectionTitle);
@@ -213,7 +206,13 @@ export function ResumeEditor({
   );
 
   function handleDragStart(e: DragStartEvent) {
+    clearHoverCursor();
     setActiveId(String(e.active.id));
+  }
+
+  function handleDragCancel() {
+    clearHoverCursor();
+    setActiveId(null);
   }
 
   // Live-move an already-placed outline entry across sections as the drag
@@ -303,6 +302,7 @@ export function ResumeEditor({
   // not the viewport, so they hold up regardless of window size.
   const [bankWidthPct, setBankWidthPct] = useState(50);
   const [resizingSplit, setResizingSplit] = useState(false);
+  const [splitHovered, setSplitHovered] = useState(false);
   const splitRowRef = useRef<HTMLDivElement>(null);
 
   function clampSplit(pct: number) {
@@ -324,32 +324,18 @@ export function ResumeEditor({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b border-line px-3 py-1">
-        {resume ? (
-          <ResumeTitle
-            key={renaming ? "editing" : "viewing"}
-            resume={resume}
-            renaming={renaming}
-            onStartRename={() => setRenaming(true)}
-            onCommitRename={(title) => {
-              setRenaming(false);
-              renameResume(title);
-            }}
-          />
-        ) : (
-          <>
-            <span className="px-1 py-1 font-mono text-[10.5px] uppercase tracking-wide text-faint">
-              No resume yet
-            </span>
-            <button
-              onClick={createResume}
-              className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
-            >
-              <Plus className="size-3" />
-              Create resume
-            </button>
-          </>
-        )}
+      <div className="flex items-center gap-2 border-b border-line px-3 pt-4 pb-1">
+        <BackToDesktopLink />
+        <ResumeTitle
+          key={renaming ? "editing" : "viewing"}
+          resume={resume}
+          renaming={renaming}
+          onStartRename={() => setRenaming(true)}
+          onCommitRename={(title) => {
+            setRenaming(false);
+            renameResume(title);
+          }}
+        />
         {addError && <span className="px-2 text-[11.5px] text-danger">{addError}</span>}
       </div>
 
@@ -359,6 +345,7 @@ export function ResumeEditor({
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
         <div ref={splitRowRef} className={`flex min-h-0 flex-1 ${resizingSplit ? "cursor-col-resize select-none" : ""}`}>
           <div className="min-h-0 min-w-[15%]" style={{ width: `${bankWidthPct}%` }}>
@@ -390,25 +377,30 @@ export function ResumeEditor({
             onPointerMove={onSplitPointerMove}
             onPointerUp={onSplitPointerUp}
             onPointerCancel={onSplitPointerUp}
-            className="group relative w-2 shrink-0 cursor-col-resize touch-none"
+            onPointerEnter={() => {
+              setSplitHovered(true);
+              setHoverCursor("col-resize");
+            }}
+            onPointerLeave={() => {
+              setSplitHovered(false);
+              clearHoverCursor("col-resize");
+            }}
+            style={{ cursor: resizingSplit ? "col-resize" : splitHovered ? "col-resize" : undefined }}
+            className="group relative w-2 shrink-0 cursor-auto touch-none"
           >
             <div
-              className={`absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-line transition-colors ${
+              className={`pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-line transition-colors ${
                 resizingSplit ? "bg-brand" : "group-hover:bg-brand"
               }`}
             />
           </div>
           <div className="min-h-0 min-w-[15%] flex-1">
-            {resume ? (
-              <OutlinePane
-                sections={sections}
-                entryById={entryById}
-                onChange={updateSections}
-                draggedEntry={activeBankEntry}
-              />
-            ) : (
-              <div className="p-4 text-[12.5px] text-faint">Create a resume to start assembling.</div>
-            )}
+            <OutlinePane
+              sections={sections}
+              entryById={entryById}
+              onChange={updateSections}
+              draggedEntry={activeBankEntry}
+            />
           </div>
         </div>
         <DragOverlay>

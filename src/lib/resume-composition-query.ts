@@ -24,9 +24,16 @@ export interface ResumeSectionRow {
 
 // Shared by GET /api/resumes/:id and page.tsx's initial server-rendered
 // load, so the two don't drift on what "a resume's composition" means.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function loadResumeComposition(
   resumeId: string,
 ): Promise<{ resume: ResumeMetaRow; sections: ResumeSectionRow[] } | null> {
+  // A malformed id (not even UUID-shaped) should 404 like any other
+  // nonexistent resume, not surface Postgres's "invalid input syntax for
+  // type uuid" as a raw 500 — /resume/[id] can be hit with any route param.
+  if (!UUID_RE.test(resumeId)) return null;
+
   const { data: resume, error: resumeError } = asRow<ResumeMetaRow>(
     await ownerScopedTable("resume")
       .select("id, title, template_shell_id, compile_status, updated_at")
