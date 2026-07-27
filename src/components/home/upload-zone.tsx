@@ -1,8 +1,16 @@
 "use client";
 
-import { forwardRef, useImperativeHandle, useRef, useState, type DragEvent } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type DragEvent,
+} from "react";
 import { Upload } from "lucide-react";
-import type { BankEntryRow } from "@/app/api/entries/route";
+import type { BankEntryRow } from "@/lib/rows";
+import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
 
 export interface ImportResult {
   templateShellId: string;
@@ -39,8 +47,16 @@ export const UploadZone = forwardRef<
   }
 >(function UploadZone({ onImported, onStatus, hideDropzone }, ref) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+
+  useEffect(
+    () => () => {
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    },
+    [],
+  );
 
   useImperativeHandle(ref, () => ({
     open: () => inputRef.current?.click(),
@@ -52,8 +68,13 @@ export const UploadZone = forwardRef<
       onStatus?.({ kind: "error", message: "only .zip exports are supported" });
       return;
     }
+    if (file.size > MAX_ARCHIVE_BYTES) {
+      onStatus?.({ kind: "error", message: "that ZIP is too large to import" });
+      return;
+    }
 
     setUploading(true);
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
     onStatus?.(null);
     try {
       const form = new FormData();
@@ -72,7 +93,7 @@ export const UploadZone = forwardRef<
         const result = body as unknown as ImportResult;
         onImported(result);
         onStatus?.({ kind: "success", message: `Added "${file.name.replace(/\.zip$/i, "")}" to your bank.` });
-        setTimeout(() => onStatus?.(null), 3000);
+        statusTimerRef.current = setTimeout(() => onStatus?.(null), 3000);
         return;
       }
       if (body?.mismatchReport) {
@@ -84,6 +105,8 @@ export const UploadZone = forwardRef<
         kind: "error",
         message: typeof body?.error === "string" ? body.error : "upload failed, try again",
       });
+    } catch {
+      onStatus?.({ kind: "error", message: "upload failed, try again" });
     } finally {
       setUploading(false);
     }

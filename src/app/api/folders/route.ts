@@ -1,14 +1,8 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { dedupeName } from "@/lib/dedupe-name";
-
-export interface ResumeFolderRow {
-  id: string;
-  name: string;
-  position_x: number;
-  position_y: number;
-  created_at: string;
-}
+import { readJsonObject } from "@/lib/api-request";
+import type { ResumeFolderRow } from "@/lib/rows";
 
 export async function GET() {
   const { data, error } = await ownerScopedTable("resume_folder")
@@ -21,10 +15,19 @@ export async function GET() {
 // Like a fresh Finder folder — defaults to "Untitled Folder", immediately
 // renameable client-side rather than prompting for a name up front.
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({}));
+  const body = await readJsonObject(request);
+  if (!body) {
+    return NextResponse.json({ error: "body must be a JSON object" }, { status: 400 });
+  }
   const desiredName = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "Untitled Folder";
-  const positionX = Number.isFinite(body.positionX) ? body.positionX : 0;
-  const positionY = Number.isFinite(body.positionY) ? body.positionY : 0;
+  if (body.positionX !== undefined && !Number.isInteger(body.positionX)) {
+    return NextResponse.json({ error: "positionX must be an integer" }, { status: 400 });
+  }
+  if (body.positionY !== undefined && !Number.isInteger(body.positionY)) {
+    return NextResponse.json({ error: "positionY must be an integer" }, { status: 400 });
+  }
+  const positionX = typeof body.positionX === "number" ? body.positionX : 0;
+  const positionY = typeof body.positionY === "number" ? body.positionY : 0;
 
   const { data: existing, error: existingError } = await ownerScopedTable("resume_folder").select("name");
   if (existingError) throw new Error((existingError as { message: string }).message);

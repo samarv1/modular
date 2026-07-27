@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
 
 // Bank entries are immutable raw LaTeX (PLAN.md) — display name and tags
 // are the only editable fields, so this is the only write path onto bank_entry.
@@ -8,7 +9,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const body = await request.json();
+  const body = await readJsonObject(request);
+  if (!body) {
+    return NextResponse.json({ error: "body must be a JSON object" }, { status: 400 });
+  }
 
   const values: Record<string, unknown> = {};
   if (typeof body.displayName === "string") {
@@ -21,7 +25,7 @@ export async function PATCH(
     if (!body.tags.every((t: unknown) => typeof t === "string")) {
       return NextResponse.json({ error: "tags must be strings" }, { status: 400 });
     }
-    values.tags = body.tags.map((t: string) => t.trim()).filter(Boolean);
+    values.tags = [...new Set(body.tags.map((t: string) => t.trim()).filter(Boolean))];
   }
   if (Object.keys(values).length === 0) {
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });
@@ -34,7 +38,10 @@ export async function PATCH(
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 404 });
+    return NextResponse.json(
+      { error: error.message },
+      { status: mutationErrorStatus(error) },
+    );
   }
   return NextResponse.json({ entry: data });
 }

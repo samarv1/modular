@@ -8,7 +8,7 @@ import { ChevronDown, ChevronUp, GripVertical, Plus, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
 import { sectionGroupLabel } from "@/lib/section-label";
-import type { BankEntryRow } from "@/app/api/entries/route";
+import type { BankEntryRow } from "@/lib/rows";
 import { NEW_SECTION_DROP_ID, SECTION_APPEND_PREFIX } from "@/components/dnd-ids";
 
 export interface EditorSection {

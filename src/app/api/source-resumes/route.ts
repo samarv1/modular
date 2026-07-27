@@ -1,14 +1,9 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import type { SourceResumeRow } from "@/lib/rows";
 
 function asRows<T>(result: { data: unknown; error: unknown }) {
   return result as { data: T[] | null; error: { message: string } | null };
-}
-
-export interface SourceResumeRow {
-  id: string;
-  display_name: string | null;
-  created_at: string;
 }
 
 // Backs the home page's "Bank" static page (Desktop) — a plain list of what

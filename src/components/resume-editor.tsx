@@ -10,7 +10,6 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-  type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
@@ -19,7 +18,7 @@ import { BackToDesktopLink } from "@/components/back-to-desktop";
 import { BankPane, BankEntryCardVisual } from "@/components/bank/bank-pane";
 import { OutlinePane, type EditorSection } from "@/components/outline/outline-pane";
 import { BANK_DRAG_PREFIX, NEW_SECTION_DROP_ID, SECTION_APPEND_PREFIX } from "@/components/dnd-ids";
-import type { BankEntryRow } from "@/app/api/entries/route";
+import type { BankEntryRow } from "@/lib/rows";
 import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
 import type { ResumeMetaRow, ResumeSectionRow } from "@/lib/resume-composition-query";
 
@@ -39,6 +38,7 @@ function ResumeTitle({
   onCommitRename: (title: string) => void;
 }) {
   const [draft, setDraft] = useState(resume.title);
+  const cancelRenameRef = useRef(false);
 
   if (renaming) {
     return (
@@ -50,10 +50,18 @@ function ResumeTitle({
         onFocus={(e) => e.currentTarget.select()}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => onCommitRename(draft)}
+        onBlur={() => {
+          if (cancelRenameRef.current) {
+            cancelRenameRef.current = false;
+            onCommitRename(resume.title);
+            return;
+          }
+          onCommitRename(draft);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
           if (e.key === "Escape") {
+            cancelRenameRef.current = true;
             setDraft(resume.title);
             e.currentTarget.blur();
           }
@@ -103,64 +111,108 @@ export function ResumeEditor({
   const [resume, setResume] = useState(initialResume);
   const [sections, setSections] = useState<EditorSection[]>(toEditorSections(initialSections));
   const [addError, setAddError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   // A freshly-created resume (via the home page's "New resume", which
   // navigates here with ?new=1) opens straight into rename mode rather than
   // just appearing with the default "Untitled resume" title — that's the
   // signal that you're now working on something new, and gets it named in
   // the same motion instead of leaving the default title to edit later.
   const [renaming, setRenaming] = useState(initialRenaming);
+  const addErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => () => clearHoverCursor(), []);
+  useEffect(
+    () => () => {
+      clearHoverCursor();
+      if (addErrorTimerRef.current) clearTimeout(addErrorTimerRef.current);
+    },
+    [],
+  );
+
+  function showAddError(message: string) {
+    setAddError(message);
+    if (addErrorTimerRef.current) clearTimeout(addErrorTimerRef.current);
+    addErrorTimerRef.current = setTimeout(() => setAddError(null), 3500);
+  }
 
   const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries]);
   const usedEntryIds = useMemo(() => new Set(sections.flatMap((s) => s.entries)), [sections]);
 
-  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isFirstRender = useRef(true);
+  // Composition writes are serialized and coalesced: while one request is in
+  // flight, only the newest pending snapshot is retained. This prevents an
+  // older request from finishing after a newer one and overwriting it.
+  const saveQueueRef = useRef<{
+    running: boolean;
+    pending: EditorSection[] | null;
+  }>({ running: false, pending: null });
+
+  async function drainCompositionSaves() {
+    const queue = saveQueueRef.current;
+    if (queue.running) return;
+    queue.running = true;
+
+    while (queue.pending) {
+      const snapshot = queue.pending;
+      queue.pending = null;
+      try {
+        const res = await fetch(`/api/resumes/${resume.id}/composition`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sections: snapshot }),
+          keepalive: true,
+        });
+        if (!res.ok) throw new Error("composition save failed");
+        setSaveError(null);
+      } catch {
+        setSaveError("Changes could not be saved.");
+        if (!queue.pending) {
+          break;
+        }
+      }
+    }
+
+    queue.running = false;
+    if (queue.pending) void drainCompositionSaves();
+  }
+
+  function queueCompositionSave(next: EditorSection[]) {
+    const queue = saveQueueRef.current;
+    queue.pending = next.map((section) => ({
+      ...section,
+      entries: [...section.entries],
+    }));
+    void drainCompositionSaves();
+  }
 
   function updateSections(next: EditorSection[]) {
     setSections(next);
+    queueCompositionSave(next);
   }
-
-  useEffect(() => {
-    // Skip persisting the composition that was just loaded from the server
-    // on mount — only writes triggered by actual user edits should autosave.
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    if (persistTimer.current) clearTimeout(persistTimer.current);
-    persistTimer.current = setTimeout(() => {
-      fetch(`/api/resumes/${resume.id}/composition`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sections }),
-      }).catch(() => {
-        // Last-write-wins autosave (PLAN.md) — the next successful save
-        // supersedes a failed one, so a transient network error here is a
-        // silent retry-on-next-edit rather than a blocking error state.
-      });
-    }, 400);
-    return () => {
-      if (persistTimer.current) clearTimeout(persistTimer.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sections]);
 
   async function renameResume(title: string) {
     const trimmed = title.trim();
-    if (!trimmed) return;
+    if (!trimmed || trimmed === resume.title) return;
+    const previousTitle = resume.title;
     setResume((cur) => ({ ...cur, title: trimmed }));
-    await fetch(`/api/resumes/${resume.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: trimmed }),
-    });
+    try {
+      const res = await fetch(`/api/resumes/${resume.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      if (!res.ok) throw new Error("resume rename failed");
+      const body = (await res.json()) as { resume?: { title?: string } };
+      if (body.resume?.title) {
+        setResume((cur) => ({ ...cur, title: body.resume!.title! }));
+      }
+    } catch {
+      setResume((cur) => ({ ...cur, title: previousTitle }));
+      showAddError("Resume name could not be saved.");
+    }
   }
 
-  // Shared by the bank card's "+" button and drag-and-drop: place `entry`
-  // into the section titled `targetSectionTitle` (created if it doesn't
-  // exist yet), inserted just before `insertBeforeId` or appended at the end.
+  // Place `entry` into the section titled `targetSectionTitle` (created if it
+  // doesn't exist yet), inserted just before `insertBeforeId` or appended at
+  // the end.
   function placeEntry(entry: BankEntryRow, targetSectionTitle: string, insertBeforeId?: string) {
     if (usedEntryIds.has(entry.id)) return;
 
@@ -179,8 +231,7 @@ export function ResumeEditor({
     const targetHasChunk = target?.entries.some((id) => entryById.get(id)?.kind === "section_chunk");
 
     if (target && (targetHasChunk || entry.kind === "section_chunk")) {
-      setAddError(`"${targetSectionTitle}" already holds a section that must stay by itself.`);
-      setTimeout(() => setAddError(null), 3500);
+      showAddError(`"${targetSectionTitle}" already holds a section that must stay by itself.`);
       return;
     }
 
@@ -189,9 +240,11 @@ export function ResumeEditor({
       const insertAt = insertBeforeId ? nextEntries.indexOf(insertBeforeId) : -1;
       if (insertAt === -1) nextEntries.push(entry.id);
       else nextEntries.splice(insertAt, 0, entry.id);
-      setSections(sections.map((s, i) => (i === targetIndex ? { ...s, entries: nextEntries } : s)));
+      updateSections(
+        sections.map((s, i) => (i === targetIndex ? { ...s, entries: nextEntries } : s)),
+      );
     } else {
-      setSections([...sections, { title: targetSectionTitle, entries: [entry.id] }]);
+      updateSections([...sections, { title: targetSectionTitle, entries: [entry.id] }]);
     }
   }
 
@@ -213,42 +266,6 @@ export function ResumeEditor({
   function handleDragCancel() {
     clearHoverCursor();
     setActiveId(null);
-  }
-
-  // Live-move an already-placed outline entry across sections as the drag
-  // passes over another section's container, so the drop target reflects
-  // where it'll land — final order/removal-of-empties is settled in
-  // handleDragEnd. Bank cards aren't placed yet, so they get no live
-  // preview — they're only placed on drop (see handleDragEnd).
-  function handleDragOver(e: DragOverEvent) {
-    const { active, over } = e;
-    if (!over) return;
-    const activeIdStr = String(active.id);
-    if (activeIdStr.startsWith(BANK_DRAG_PREFIX)) return;
-
-    const overIdStr = String(over.id);
-    const fromIndex = findSectionIndexByEntryId(activeIdStr);
-    if (fromIndex === -1) return;
-
-    let toIndex = findSectionIndexByEntryId(overIdStr);
-    if (toIndex === -1 && overIdStr.startsWith(SECTION_APPEND_PREFIX)) {
-      toIndex = sections.findIndex((s) => s.title === overIdStr.slice(SECTION_APPEND_PREFIX.length));
-    }
-    if (toIndex === -1 || toIndex === fromIndex) return;
-
-    const targetSection = sections[toIndex];
-    const draggedEntry = entryById.get(activeIdStr);
-    const targetHasChunk = targetSection.entries.some(
-      (id) => entryById.get(id)?.kind === "section_chunk",
-    );
-    if (targetHasChunk || draggedEntry?.kind === "section_chunk") return; // exclusivity — no live preview across into/out of a chunk section
-
-    const next = sections.map((s) => ({ ...s, entries: [...s.entries] }));
-    next[fromIndex].entries = next[fromIndex].entries.filter((id) => id !== activeIdStr);
-    const overEntryIndex = next[toIndex].entries.indexOf(overIdStr);
-    if (overEntryIndex === -1) next[toIndex].entries.push(activeIdStr);
-    else next[toIndex].entries.splice(overEntryIndex, 0, activeIdStr);
-    setSections(next.filter((s) => s.entries.length > 0));
   }
 
   function handleDragEnd(e: DragEndEvent) {
@@ -278,16 +295,54 @@ export function ResumeEditor({
 
     if (activeIdStr === overIdStr) return;
 
-    // Entry-within-same-section reorder. Cross-section moves already
-    // happened during handleDragOver.
-    const sectionIndex = findSectionIndexByEntryId(activeIdStr);
-    if (sectionIndex === -1) return;
-    const section = sections[sectionIndex];
+    const fromSectionIndex = findSectionIndexByEntryId(activeIdStr);
+    if (fromSectionIndex === -1) return;
+    let toSectionIndex = findSectionIndexByEntryId(overIdStr);
+    if (toSectionIndex === -1 && overIdStr.startsWith(SECTION_APPEND_PREFIX)) {
+      toSectionIndex = sections.findIndex(
+        (section) => section.title === overIdStr.slice(SECTION_APPEND_PREFIX.length),
+      );
+    }
+    if (toSectionIndex === -1) return;
+
+    if (fromSectionIndex !== toSectionIndex) {
+      const draggedEntry = entryById.get(activeIdStr);
+      const targetSection = sections[toSectionIndex];
+      if (
+        !draggedEntry ||
+        draggedEntry.source_section.trim().toLowerCase() !==
+          targetSection.title.trim().toLowerCase()
+      ) {
+        showAddError("Entries can only be placed in their source section.");
+        return;
+      }
+      const targetHasChunk = targetSection.entries.some(
+        (id) => entryById.get(id)?.kind === "section_chunk",
+      );
+      if (targetHasChunk || draggedEntry.kind === "section_chunk") return;
+
+      const next = sections.map((section) => ({
+        ...section,
+        entries: [...section.entries],
+      }));
+      next[fromSectionIndex].entries = next[fromSectionIndex].entries.filter(
+        (id) => id !== activeIdStr,
+      );
+      const insertAt = next[toSectionIndex].entries.indexOf(overIdStr);
+      if (insertAt === -1) next[toSectionIndex].entries.push(activeIdStr);
+      else next[toSectionIndex].entries.splice(insertAt, 0, activeIdStr);
+      updateSections(next.filter((section) => section.entries.length > 0));
+      return;
+    }
+
+    const section = sections[fromSectionIndex];
     const from = section.entries.indexOf(activeIdStr);
     const to = section.entries.indexOf(overIdStr);
     if (from === -1 || to === -1 || from === to) return;
-    setSections(
-      sections.map((s, i) => (i === sectionIndex ? { ...s, entries: arrayMove(s.entries, from, to) } : s)),
+    updateSections(
+      sections.map((s, i) =>
+        i === fromSectionIndex ? { ...s, entries: arrayMove(s.entries, from, to) } : s,
+      ),
     );
   }
 
@@ -319,7 +374,9 @@ export function ResumeEditor({
   }
   function onSplitPointerUp(e: PointerEvent<HTMLDivElement>) {
     setResizingSplit(false);
-    e.currentTarget.releasePointerCapture(e.pointerId);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
   }
 
   return (
@@ -333,25 +390,38 @@ export function ResumeEditor({
           onStartRename={() => setRenaming(true)}
           onCommitRename={(title) => {
             setRenaming(false);
-            renameResume(title);
+            void renameResume(title);
           }}
         />
         {addError && <span className="px-2 text-[11.5px] text-danger">{addError}</span>}
+        {saveError && (
+          <span className="flex items-center gap-2 px-2 text-[11.5px] text-danger">
+            {saveError}
+            <button
+              onClick={() => queueCompositionSave(sections)}
+              className="font-mono text-[10px] uppercase tracking-wide underline"
+            >
+              Retry
+            </button>
+          </span>
+        )}
       </div>
 
       <DndContext
         sensors={sensors}
         collisionDetection={pointerWithin}
         onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
         <div ref={splitRowRef} className={`flex min-h-0 flex-1 ${resizingSplit ? "cursor-col-resize select-none" : ""}`}>
           <div className="min-h-0 min-w-[15%]" style={{ width: `${bankWidthPct}%` }}>
             <BankPane
-              initialEntries={entries}
+              entries={entries}
               usedEntryIds={usedEntryIds}
+              onEntriesImported={(importedEntries) =>
+                setEntries((cur) => [...importedEntries, ...cur])
+              }
               onEntryPatched={(id, values) =>
                 setEntries((cur) =>
                   cur.map((e) =>

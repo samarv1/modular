@@ -59,6 +59,13 @@ export function StaticPageIcon({
         {...attributes}
         onClick={select}
         onDoubleClick={open}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            open();
+          }
+        }}
+        aria-label={`Open ${title}`}
         className={`cursor-pointer rounded-lg border-0 p-1 ${selected ? "bg-ink/15" : "bg-transparent"}`}
       >
         {glyph === "folder" ? (
@@ -70,6 +77,12 @@ export function StaticPageIcon({
       <button
         onClick={select}
         onDoubleClick={open}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            open();
+          }
+        }}
         title={title}
         className={`inline-block max-w-full whitespace-normal break-words rounded px-1 text-center text-[11px] font-medium leading-tight ${
           selected ? "bg-brand text-white" : "text-ink"

@@ -1,25 +1,34 @@
+import { connection } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { Desktop } from "@/components/home/desktop";
-import type { ResumeFolderRow } from "@/app/api/folders/route";
-import type { ResumeRow } from "@/app/api/resumes/route";
+import type { ResumeFolderRow, ResumeRow } from "@/lib/rows";
 
 export default async function Home() {
-  const { data: folderData, error: folderError } = await ownerScopedTable("resume_folder")
-    .select("id, name, position_x, position_y, created_at")
-    .order("created_at", { ascending: true });
-  if (folderError) throw new Error((folderError as { message: string }).message);
+  // Supabase's client fetch is not enough for Next to classify this page as
+  // request-time data. Without an explicit connection boundary, production
+  // builds prerender the owner's desktop and freeze it at deploy time.
+  await connection();
 
-  const { data: resumeData, error: resumeError } = await ownerScopedTable("resume")
-    .select("id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at")
-    .order("created_at", { ascending: true });
+  const [
+    { data: folderData, error: folderError },
+    { data: resumeData, error: resumeError },
+    { data: shellData, error: shellError },
+  ] = await Promise.all([
+    ownerScopedTable("resume_folder")
+      .select("id, name, position_x, position_y, created_at")
+      .order("created_at", { ascending: true }),
+    ownerScopedTable("resume")
+      .select(
+        "id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at",
+      )
+      .order("created_at", { ascending: true }),
+    ownerScopedTable("template_shell").select("id").limit(1).maybeSingle(),
+  ]);
+  if (folderError) throw new Error((folderError as { message: string }).message);
   if (resumeError) throw new Error((resumeError as { message: string }).message);
 
   // Gates the "New resume" (blank) affordance — POST /api/resumes 422s with
   // no template shell yet, which only happens before the first ZIP import.
-  const { data: shellData, error: shellError } = await ownerScopedTable("template_shell")
-    .select("id")
-    .limit(1)
-    .maybeSingle();
   if (shellError) throw new Error((shellError as { message: string }).message);
 
   const folders = (folderData ?? []) as unknown as ResumeFolderRow[];

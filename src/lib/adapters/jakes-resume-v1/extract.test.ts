@@ -21,6 +21,18 @@ describe("jakes-resume-v1 contract check", () => {
     expect(result.compatible).toBe(false);
     expect(result.missing.length).toBeGreaterThan(0);
   });
+
+  it("does not count commented-out macro declarations", () => {
+    const commentedDeclarations = fixture
+      .split("\n")
+      .map((line) =>
+        /\\(?:re)?newcommand/.test(line) ? `% ${line}` : line,
+      )
+      .join("\n");
+    const result = checkJakeContract(commentedDeclarations);
+    expect(result.compatible).toBe(false);
+    expect(result.missing).toContain("resumeSubheading");
+  });
 });
 
 describe("jakes-resume-v1 extraction", () => {

@@ -1,12 +1,15 @@
 import JSZip from "jszip";
+import {
+  MAX_ARCHIVE_FILES,
+  MAX_LATEX_SOURCE_CHARS,
+} from "./archive-limits";
+import { stripLatexComments } from "./latex-comments";
 
 export interface LatexArchive {
   /** Path of the root .tex file within the archive. */
   rootFile: string;
   /** Full text source of the root file. */
   source: string;
-  /** Every other file in the archive (images, .cls, .sty, etc.), for round-trip export. */
-  assets: Map<string, Uint8Array>;
 }
 
 export class ArchiveRejectedError extends Error {
@@ -19,7 +22,18 @@ export class ArchiveRejectedError extends Error {
   }
 }
 
-const INPUT_INCLUDE_RE = /\\(input|include)\s*\{/;
+const INPUT_INCLUDE_RE = /\\(?:input|include)\s*(?:\{[^}]+\}|[^\s%]+)/;
+
+async function readLatexFile(file: JSZip.JSZipObject): Promise<string> {
+  const source = await file.async("string");
+  if (source.length > MAX_LATEX_SOURCE_CHARS) {
+    throw new ArchiveRejectedError(
+      `LaTeX source exceeds the ${MAX_LATEX_SOURCE_CHARS} character limit`,
+      [file.name],
+    );
+  }
+  return source;
+}
 
 /**
  * Unzips an uploaded resume archive and locates its single root .tex file.
@@ -27,7 +41,17 @@ const INPUT_INCLUDE_RE = /\\(input|include)\s*\{/;
  * else is rejected rather than partially supported.
  */
 export async function parseLatexArchive(zipBytes: Uint8Array): Promise<LatexArchive> {
-  const zip = await JSZip.loadAsync(zipBytes);
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(zipBytes);
+  } catch {
+    throw new ArchiveRejectedError("invalid ZIP archive");
+  }
+  if (Object.keys(zip.files).length > MAX_ARCHIVE_FILES) {
+    throw new ArchiveRejectedError(
+      `archive contains more than ${MAX_ARCHIVE_FILES} files`,
+    );
+  }
   const texFiles = Object.values(zip.files).filter(
     (f) => !f.dir && f.name.toLowerCase().endsWith(".tex"),
   );
@@ -40,7 +64,7 @@ export async function parseLatexArchive(zipBytes: Uint8Array): Promise<LatexArch
   if (texFiles.length > 1) {
     const withDocumentclass: typeof texFiles = [];
     for (const f of texFiles) {
-      const text = await f.async("string");
+      const text = stripLatexComments(await readLatexFile(f));
       if (/\\documentclass/.test(text)) withDocumentclass.push(f);
     }
     if (withDocumentclass.length !== 1) {
@@ -52,23 +76,28 @@ export async function parseLatexArchive(zipBytes: Uint8Array): Promise<LatexArch
     rootEntry = withDocumentclass[0];
   }
 
-  const source = await rootEntry.async("string");
+  const source = await readLatexFile(rootEntry);
+  const sourceWithoutComments = stripLatexComments(source);
+  if (
+    !/\\begin\s*\{document\}/.test(sourceWithoutComments) ||
+    !/\\end\s*\{document\}/.test(sourceWithoutComments)
+  ) {
+    throw new ArchiveRejectedError("root file is missing a document environment");
+  }
   // Only the document *body* matters here — preamble \input (e.g. Jake's own
   // canonical \input{glyphtounicode} for ATS readability) is normal and fine;
   // it's a body dependency on another file that MVP composition can't handle.
-  const bodyMatch = source.match(/\\begin\{document\}([\s\S]*)\\end\{document\}/);
-  const body = bodyMatch ? bodyMatch[1] : source;
+  const bodyMatch = sourceWithoutComments.match(
+    /\\begin\s*\{document\}([\s\S]*)\\end\s*\{document\}/,
+  );
+  const body = bodyMatch?.[1] ?? "";
   if (INPUT_INCLUDE_RE.test(body)) {
     throw new ArchiveRejectedError(
       "document body depends on \\input or \\include, which MVP composition parsing does not support",
     );
   }
 
-  const assets = new Map<string, Uint8Array>();
-  for (const [path, file] of Object.entries(zip.files)) {
-    if (file.dir || path === rootEntry.name) continue;
-    assets.set(path, await file.async("uint8array"));
-  }
-
-  return { rootFile: rootEntry.name, source, assets };
+  // Assets stay in the original ZIP uploaded to storage. Expanding every
+  // image/style file here doubled memory usage without any runtime consumer.
+  return { rootFile: rootEntry.name, source };
 }

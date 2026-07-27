@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { Pencil } from "lucide-react";
 import { FOLDER_DRAG_PREFIX, FOLDER_DROP_PREFIX } from "@/components/home/desktop-dnd-ids";
@@ -80,6 +80,7 @@ export function FolderIcon({
   onOpen: () => void;
 }) {
   const [draft, setDraft] = useState(name);
+  const cancelRenameRef = useRef(false);
   const { attributes, listeners, setNodeRef: setDragRef, transform, isDragging } = useDraggable({
     id: FOLDER_DRAG_PREFIX + id,
   });
@@ -105,6 +106,13 @@ export function FolderIcon({
         {...attributes}
         onClick={onSelect}
         onDoubleClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            onOpen();
+          }
+        }}
+        aria-label={`Open folder ${name}`}
         className={`cursor-pointer rounded-lg border-0 p-1 ${selected ? "bg-ink/15" : "bg-transparent"}`}
       >
         <FolderGlyph hasContents={hasContents} isOver={isOver} />
@@ -115,10 +123,19 @@ export function FolderIcon({
           onFocus={(e) => e.currentTarget.select()}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => onCommitRename(draft)}
+          onBlur={() => {
+            if (cancelRenameRef.current) {
+              cancelRenameRef.current = false;
+              setDraft(name);
+              onCommitRename(name);
+              return;
+            }
+            onCommitRename(draft);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") e.currentTarget.blur();
             if (e.key === "Escape") {
+              cancelRenameRef.current = true;
               setDraft(name);
               e.currentTarget.blur();
             }
@@ -147,6 +164,7 @@ export function FolderIcon({
           <button
             onClick={(e) => {
               e.stopPropagation();
+              setDraft(name);
               onStartRename();
             }}
             title="Rename folder"

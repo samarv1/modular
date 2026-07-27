@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -26,9 +26,7 @@ import {
   RESUME_DRAG_PREFIX,
   STATIC_PAGE_DRAG_PREFIX,
 } from "@/components/home/desktop-dnd-ids";
-import type { ResumeFolderRow } from "@/app/api/folders/route";
-import type { ResumeRow } from "@/app/api/resumes/route";
-import type { SourceResumeRow } from "@/app/api/source-resumes/route";
+import type { ResumeFolderRow, ResumeRow, SourceResumeRow } from "@/lib/rows";
 import { nextPlacement } from "@/lib/desktop-placement";
 import { STATIC_PAGES } from "@/lib/static-pages";
 
@@ -65,6 +63,7 @@ export function Desktop({
   const router = useRouter();
   const [folders, setFolders] = useState(initialFolders);
   const [resumes, setResumes] = useState(initialResumes);
+  const [templateShellAvailable, setTemplateShellAvailable] = useState(hasTemplateShell);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   // Finder-style selection: one item at a time, first click highlights and
@@ -73,7 +72,23 @@ export function Desktop({
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null);
+  const resumePatchVersions = useRef(new Map<string, number>());
+  const folderPatchVersions = useRef(new Map<string, number>());
+
+  const showError = useCallback((message: string) => {
+    setError(message);
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = setTimeout(() => setError(null), 3500);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    },
+    [],
+  );
 
   // Which permanent static page (e.g. About) is open, if any — mutually
   // exclusive with currentFolderId, its own view rather than a folder.
@@ -87,15 +102,18 @@ export function Desktop({
   // the page is opened), since the closed folder icon also needs to know
   // whether there's anything inside to show the non-empty "peek" glyph.
   const [bankFiles, setBankFiles] = useState<SourceResumeRow[] | null>(null);
-  function refreshBankFiles() {
+  const refreshBankFiles = useCallback(() => {
     fetch("/api/source-resumes")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("bank refresh failed");
+        return res.json();
+      })
       .then((body) => setBankFiles(body.sourceResumes ?? []))
-      .catch(() => setBankFiles([]));
-  }
+      .catch(() => showError("Bank files could not be loaded."));
+  }, [showError]);
   useEffect(() => {
     refreshBankFiles();
-  }, []);
+  }, [refreshBankFiles]);
 
   // Static pages aren't owner data, so their desktop position lives in
   // localStorage, not the DB. Seeded with a grid default here (SSR-safe —
@@ -120,7 +138,10 @@ export function Desktop({
         const raw = window.localStorage.getItem(pagePositionKey(page.id));
         if (!raw) continue;
         try {
-          next[page.id] = JSON.parse(raw);
+          const parsed = JSON.parse(raw) as { x?: unknown; y?: unknown };
+          if (Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) {
+            next[page.id] = { x: Number(parsed.x), y: Number(parsed.y) };
+          }
         } catch {
           // ignore malformed/stale localStorage value, keep the grid default
         }
@@ -147,24 +168,64 @@ export function Desktop({
   // here is already one discrete commit. Debouncing it only risked losing
   // the write if the user navigated away (e.g. double-clicked a resume open)
   // before the delay elapsed.
-  function patchResume(id: string, values: Record<string, unknown>) {
-    fetch(`/api/resumes/${id}`, {
+  function patchResume(
+    id: string,
+    values: Record<string, unknown>,
+    previous: ResumeRow,
+  ) {
+    const version = (resumePatchVersions.current.get(id) ?? 0) + 1;
+    resumePatchVersions.current.set(id, version);
+    void fetch(`/api/resumes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(values),
-    }).catch(() => {
-      // Last-write-wins, same as autosave elsewhere — a transient failure
-      // here just means the position/folder move didn't stick; the next
-      // drag on this item will retry with a fresh value.
-    });
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error("resume update failed");
+        const body = (await res.json()) as { resume?: Partial<ResumeRow> };
+        if (resumePatchVersions.current.get(id) === version && body.resume) {
+          setResumes((cur) =>
+            cur.map((resume) =>
+              resume.id === id ? { ...resume, ...body.resume } : resume,
+            ),
+          );
+        }
+      })
+      .catch(() => {
+        if (resumePatchVersions.current.get(id) !== version) return;
+        setResumes((cur) => cur.map((resume) => (resume.id === id ? previous : resume)));
+        showError("Resume changes could not be saved.");
+      });
   }
 
-  function patchFolder(id: string, values: Record<string, unknown>) {
-    fetch(`/api/folders/${id}`, {
+  function patchFolder(
+    id: string,
+    values: Record<string, unknown>,
+    previous: ResumeFolderRow,
+  ) {
+    const version = (folderPatchVersions.current.get(id) ?? 0) + 1;
+    folderPatchVersions.current.set(id, version);
+    void fetch(`/api/folders/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(values),
-    }).catch(() => {});
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error("folder update failed");
+        const body = (await res.json()) as { folder?: Partial<ResumeFolderRow> };
+        if (folderPatchVersions.current.get(id) === version && body.folder) {
+          setFolders((cur) =>
+            cur.map((folder) =>
+              folder.id === id ? { ...folder, ...body.folder } : folder,
+            ),
+          );
+        }
+      })
+      .catch(() => {
+        if (folderPatchVersions.current.get(id) !== version) return;
+        setFolders((cur) => cur.map((folder) => (folder.id === id ? previous : folder)));
+        showError("Folder changes could not be saved.");
+      });
   }
 
   function handleDragEnd(e: DragEndEvent) {
@@ -184,7 +245,11 @@ export function Desktop({
         setResumes((cur) =>
           cur.map((r) => (r.id === resumeId ? { ...r, folder_id: folderId, position_x: pos.x, position_y: pos.y } : r)),
         );
-        patchResume(resumeId, { folderId, positionX: pos.x, positionY: pos.y });
+        patchResume(
+          resumeId,
+          { folderId, positionX: pos.x, positionY: pos.y },
+          resume,
+        );
         return;
       }
       if (overId === DESKTOP_BACK_DROP_ID) {
@@ -193,7 +258,11 @@ export function Desktop({
         setResumes((cur) =>
           cur.map((r) => (r.id === resumeId ? { ...r, folder_id: null, position_x: pos.x, position_y: pos.y } : r)),
         );
-        patchResume(resumeId, { folderId: null, positionX: pos.x, positionY: pos.y });
+        patchResume(
+          resumeId,
+          { folderId: null, positionX: pos.x, positionY: pos.y },
+          resume,
+        );
         return;
       }
       // Dropped in open canvas — just reposition within the current container.
@@ -203,7 +272,7 @@ export function Desktop({
       const nextX = Math.round(resume.position_x + delta.x);
       const nextY = Math.round(resume.position_y + delta.y);
       setResumes((cur) => cur.map((r) => (r.id === resumeId ? { ...r, position_x: nextX, position_y: nextY } : r)));
-      patchResume(resumeId, { positionX: nextX, positionY: nextY });
+      patchResume(resumeId, { positionX: nextX, positionY: nextY }, resume);
       return;
     }
 
@@ -214,7 +283,7 @@ export function Desktop({
       const nextX = Math.round(folder.position_x + delta.x);
       const nextY = Math.round(folder.position_y + delta.y);
       setFolders((cur) => cur.map((f) => (f.id === folderId ? { ...f, position_x: nextX, position_y: nextY } : f)));
-      patchFolder(folderId, { positionX: nextX, positionY: nextY });
+      patchFolder(folderId, { positionX: nextX, positionY: nextY }, folder);
       return;
     }
 
@@ -231,32 +300,37 @@ export function Desktop({
   async function createFolder() {
     const topLevel = resumes.filter((r) => r.folder_id === null);
     const pos = nextPlacement(STATIC_PAGES.length + folders.length + topLevel.length);
-    const res = await fetch("/api/folders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ positionX: pos.x, positionY: pos.y }),
-    });
-    if (!res.ok) return;
-    const { folder } = await res.json();
-    setFolders((cur) => [...cur, folder]);
-    setRenamingFolderId(folder.id);
+    try {
+      const res = await fetch("/api/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ positionX: pos.x, positionY: pos.y }),
+      });
+      if (!res.ok) throw new Error("folder create failed");
+      const { folder } = await res.json();
+      setFolders((cur) => [...cur, folder]);
+      setRenamingFolderId(folder.id);
+    } catch {
+      showError("Folder could not be created.");
+    }
   }
 
   async function renameFolder(id: string, name: string) {
     const trimmed = name.trim();
     setRenamingFolderId(null);
     if (!trimmed) return;
+    const previous = folders.find((folder) => folder.id === id);
+    if (!previous || trimmed === previous.name) return;
     setFolders((cur) => cur.map((f) => (f.id === id ? { ...f, name: trimmed } : f)));
-    patchFolder(id, { name: trimmed });
+    patchFolder(id, { name: trimmed }, previous);
   }
 
   // Available both at the top level and inside a folder — creating from
   // inside a folder drops the new resume straight into it, not onto the
   // desktop underneath.
   async function createResume() {
-    if (!hasTemplateShell) {
-      setError("Import one of your resume ZIPs first");
-      setTimeout(() => setError(null), 3500);
+    if (!templateShellAvailable) {
+      showError("Import one of your resume ZIPs first");
       return;
     }
     const containerCount =
@@ -264,20 +338,24 @@ export function Desktop({
         ? STATIC_PAGES.length + resumes.filter((r) => r.folder_id === null).length + folders.length
         : resumes.filter((r) => r.folder_id === currentFolderId).length;
     const pos = nextPlacement(containerCount);
-    const res = await fetch("/api/resumes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: "Untitled resume",
-        positionX: pos.x,
-        positionY: pos.y,
-        folderId: currentFolderId,
-      }),
-    });
-    if (!res.ok) return;
-    const { resume } = await res.json();
-    router.push(`/resume/${resume.id}?new=1`);
-    router.refresh();
+    try {
+      const res = await fetch("/api/resumes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Untitled resume",
+          positionX: pos.x,
+          positionY: pos.y,
+          folderId: currentFolderId,
+        }),
+      });
+      if (!res.ok) throw new Error("resume create failed");
+      const { resume } = await res.json();
+      router.push(`/resume/${resume.id}?new=1`);
+      router.refresh();
+    } catch {
+      showError("Resume could not be created.");
+    }
   }
 
   return (
@@ -326,7 +404,13 @@ export function Desktop({
             <div className="flex items-center gap-2">
               <span className="font-mono text-[10px] uppercase tracking-wide text-faint">Import</span>
               <div className="w-[260px]">
-                <UploadZone onImported={refreshBankFiles} onStatus={setUploadStatus} />
+                <UploadZone
+                  onImported={() => {
+                    setTemplateShellAvailable(true);
+                    refreshBankFiles();
+                  }}
+                  onStatus={setUploadStatus}
+                />
               </div>
               {uploadStatus && (
                 <span

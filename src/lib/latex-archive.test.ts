@@ -39,4 +39,31 @@ describe("parseLatexArchive", () => {
     });
     await expect(parseLatexArchive(bytes)).rejects.toThrow(ArchiveRejectedError);
   });
+
+  it("turns malformed ZIP data into an actionable rejection", async () => {
+    await expect(
+      parseLatexArchive(new TextEncoder().encode("not a zip")),
+    ).rejects.toThrow("invalid ZIP archive");
+  });
+
+  it("ignores commented-out body includes", async () => {
+    const source =
+      "\\documentclass{article}\\begin{document}\n% \\input{other}\nhello\\end{document}";
+    const bytes = await zipOf({ "resume.tex": source });
+    await expect(parseLatexArchive(bytes)).resolves.toMatchObject({ source });
+  });
+
+  it("rejects an unbraced body include", async () => {
+    const source =
+      "\\documentclass{article}\\begin{document}\\input other.tex\\end{document}";
+    const bytes = await zipOf({ "resume.tex": source });
+    await expect(parseLatexArchive(bytes)).rejects.toThrow(ArchiveRejectedError);
+  });
+
+  it("rejects a root file without a document environment", async () => {
+    const bytes = await zipOf({ "resume.tex": "\\documentclass{article}" });
+    await expect(parseLatexArchive(bytes)).rejects.toThrow(
+      "root file is missing a document environment",
+    );
+  });
 });

@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { stripLatexComments } from "../../latex-comments";
 import { JAKE_CONTRACT_MACROS } from "./macros";
 
 const NEWCOMMAND_RE =
@@ -7,7 +8,7 @@ const NEWCOMMAND_RE =
 /** name -> declared arg count, read from \newcommand{\name}[N]{...} declarations. */
 export function readDeclaredMacroArity(source: string): Map<string, number> {
   const arity = new Map<string, number>();
-  for (const match of source.matchAll(NEWCOMMAND_RE)) {
+  for (const match of stripLatexComments(source).matchAll(NEWCOMMAND_RE)) {
     const [, name, argCount] = match;
     arity.set(name, argCount ? Number(argCount) : 0);
   }

@@ -4,8 +4,9 @@ import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
 import { detectAdapter } from "@/lib/adapters/registry";
 import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
-import { uploadArchive } from "@/lib/storage";
+import { deleteArchive, uploadArchive } from "@/lib/storage";
 import { dedupeName } from "@/lib/dedupe-name";
+import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
 
 // Without generated Database types, supabase-js's select() return type
 // collapses to an unusable GenericStringError rather than a clean `any`.
@@ -18,11 +19,48 @@ function asRows<T extends Row>(result: { data: unknown; error: unknown }) {
   return result as { data: T[] | null; error: { message: string } | null };
 }
 
+async function cleanupFailedImport({
+  archivePath,
+  sourceResumeId,
+  createdShellId,
+}: {
+  archivePath: string;
+  sourceResumeId?: string;
+  createdShellId?: string;
+}) {
+  if (sourceResumeId) {
+    await ownerScopedTable("bank_entry")
+      .delete()
+      .eq("source_resume_id", sourceResumeId)
+      .then(() => undefined, () => undefined);
+    await ownerScopedTable("source_resume")
+      .delete()
+      .eq("id", sourceResumeId)
+      .then(() => undefined, () => undefined);
+  }
+  if (createdShellId) {
+    await ownerScopedTable("template_shell")
+      .delete()
+      .eq("id", createdShellId)
+      .then(() => undefined, () => undefined);
+  }
+  await deleteArchive(archivePath).catch(() => undefined);
+}
+
 export async function POST(request: Request) {
-  const form = await request.formData();
+  const form = await request.formData().catch(() => null);
+  if (!form) {
+    return NextResponse.json({ error: "body must be multipart form data" }, { status: 400 });
+  }
   const file = form.get("file");
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "missing file" }, { status: 400 });
+  }
+  if (file.size > MAX_ARCHIVE_BYTES) {
+    return NextResponse.json(
+      { error: `archive exceeds the ${MAX_ARCHIVE_BYTES} byte limit` },
+      { status: 413 },
+    );
   }
 
   const zipBytes = new Uint8Array(await file.arrayBuffer());
@@ -55,68 +93,9 @@ export async function POST(request: Request) {
   }
 
   const extracted = adapter.extract({ rootFile: archive.rootFile, source: archive.source });
-  const ownerId = getOwnerId();
-  const archivePath = `${ownerId}/${randomUUID()}.zip`;
-  await uploadArchive(archivePath, zipBytes, "application/zip");
-
-  // First compatible upload for this fingerprint establishes the shell;
-  // later ones reuse it (see PLAN.md: "first upload becomes the template shell").
-  const shells = ownerScopedTable("template_shell");
-  const { data: existingShell, error: shellLookupError } = asRow<{ id: string }>(
-    await shells
-      .select("id")
-      .eq("adapter_id", adapter.id)
-      .eq("fingerprint", result.fingerprint!)
-      .limit(1)
-      .maybeSingle(),
-  );
-  if (shellLookupError) throw new Error(shellLookupError.message);
-
-  let templateShellId = existingShell?.id;
-  if (!templateShellId) {
-    const { data: newShell, error: insertShellError } = asRow<{ id: string }>(
-      await shells
-        .insert({
-          archive_path: archivePath,
-          root_file: archive.rootFile,
-          adapter_id: adapter.id,
-          fingerprint: result.fingerprint,
-          preamble: extracted.preamble,
-        })
-        .select("id")
-        .single(),
-    );
-    if (insertShellError) throw new Error(insertShellError.message);
-    templateShellId = newShell!.id;
-  }
-
-  const desiredDisplayName = file.name.replace(/\.zip$/i, "");
-  const { data: existingDisplayNames, error: existingDisplayNamesError } = await ownerScopedTable("source_resume")
-    .select("display_name")
-    .not("display_name", "is", null);
-  if (existingDisplayNamesError) throw new Error(existingDisplayNamesError.message);
-  const displayName = dedupeName(
-    desiredDisplayName,
-    ((existingDisplayNames ?? []) as unknown as { display_name: string }[]).map((r) => r.display_name),
-  );
-
-  const { data: sourceResume, error: sourceResumeError } = asRow<{ id: string }>(
-    await ownerScopedTable("source_resume")
-      .insert({
-        template_shell_id: templateShellId,
-        archive_path: archivePath,
-        import_status: "success",
-        display_name: displayName,
-      })
-      .select("id")
-      .single(),
-  );
-  if (sourceResumeError) throw new Error(sourceResumeError.message);
-  const sourceResumeId = sourceResume!.id;
-
   const entryRows = extracted.sections.flatMap((section) =>
     section.entries.map((entry) => ({
-      source_resume_id: sourceResumeId,
+      source_resume_id: "",
       kind: entry.kind,
       source_section: section.title,
       raw_latex: entry.rawLatex,
@@ -127,35 +106,116 @@ export async function POST(request: Request) {
       tags: [],
     })),
   );
+  if (entryRows.length === 0) {
+    return NextResponse.json(
+      { error: "no reusable resume entries were found" },
+      { status: 422 },
+    );
+  }
 
-  // Same column set as GET /api/entries, so the client can prepend these
-  // straight into its BankEntryRow[] state without a refetch.
-  const { data: insertedEntries, error: entriesError } = asRows<{
-    id: string;
-    kind: string;
-    source_section: string;
-    display_name: string;
-    raw_latex: string;
-    tags: string[];
-    required_packages: string[];
-    source_resume_id: string | null;
-    source_resume: { display_name: string | null } | null;
-    created_at: string;
-  }>(
-    await ownerScopedTable("bank_entry")
-      .insert(entryRows)
-      .select(
-        "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
+  const ownerId = getOwnerId();
+  const archivePath = `${ownerId}/${randomUUID()}.zip`;
+  await uploadArchive(archivePath, zipBytes, "application/zip");
+
+  const partial: { sourceResumeId?: string; createdShellId?: string } = {};
+  try {
+    // First compatible upload for this fingerprint establishes the shell;
+    // later ones reuse it (see PLAN.md: "first upload becomes the template shell").
+    const shells = ownerScopedTable("template_shell");
+    const { data: existingShell, error: shellLookupError } = asRow<{ id: string }>(
+      await shells
+        .select("id")
+        .eq("adapter_id", adapter.id)
+        .eq("fingerprint", result.fingerprint!)
+        .limit(1)
+        .maybeSingle(),
+    );
+    if (shellLookupError) throw new Error(shellLookupError.message);
+
+    let templateShellId = existingShell?.id;
+    if (!templateShellId) {
+      const { data: newShell, error: insertShellError } = asRow<{ id: string }>(
+        await shells
+          .insert({
+            archive_path: archivePath,
+            root_file: archive.rootFile,
+            adapter_id: adapter.id,
+            fingerprint: result.fingerprint,
+            preamble: extracted.preamble,
+          })
+          .select("id")
+          .single(),
+      );
+      if (insertShellError) throw new Error(insertShellError.message);
+      templateShellId = newShell!.id;
+      partial.createdShellId = templateShellId;
+    }
+
+    const desiredDisplayName =
+      file.name.replace(/\.zip$/i, "").trim() || "Imported resume";
+    const { data: existingDisplayNames, error: existingDisplayNamesError } =
+      await ownerScopedTable("source_resume")
+        .select("display_name")
+        .not("display_name", "is", null);
+    if (existingDisplayNamesError) throw new Error(existingDisplayNamesError.message);
+    const displayName = dedupeName(
+      desiredDisplayName,
+      ((existingDisplayNames ?? []) as unknown as { display_name: string }[]).map(
+        (resume) => resume.display_name,
       ),
-  );
-  if (entriesError) throw new Error(entriesError.message);
+    );
 
-  return NextResponse.json({
-    compatible: true,
-    templateShellId,
-    sourceResumeId,
-    entryCount: entryRows.length,
-    entries: insertedEntries,
-    sections: extracted.sections.map((s) => ({ title: s.title, entryCount: s.entries.length })),
-  });
+    const { data: sourceResume, error: sourceResumeError } = asRow<{ id: string }>(
+      await ownerScopedTable("source_resume")
+        .insert({
+          template_shell_id: templateShellId,
+          archive_path: archivePath,
+          import_status: "success",
+          display_name: displayName,
+        })
+        .select("id")
+        .single(),
+    );
+    if (sourceResumeError) throw new Error(sourceResumeError.message);
+    const sourceResumeId = sourceResume!.id;
+    partial.sourceResumeId = sourceResumeId;
+    for (const entryRow of entryRows) entryRow.source_resume_id = sourceResumeId;
+
+    // Same column set as GET /api/entries, so the client can prepend these
+    // straight into its BankEntryRow[] state without a refetch.
+    const { data: insertedEntries, error: entriesError } = asRows<{
+      id: string;
+      kind: string;
+      source_section: string;
+      display_name: string;
+      raw_latex: string;
+      tags: string[];
+      required_packages: string[];
+      source_resume_id: string | null;
+      source_resume: { display_name: string | null } | null;
+      created_at: string;
+    }>(
+      await ownerScopedTable("bank_entry")
+        .insert(entryRows)
+        .select(
+          "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
+        ),
+    );
+    if (entriesError) throw new Error(entriesError.message);
+
+    return NextResponse.json({
+      compatible: true,
+      templateShellId,
+      sourceResumeId,
+      entryCount: entryRows.length,
+      entries: insertedEntries,
+      sections: extracted.sections.map((section) => ({
+        title: section.title,
+        entryCount: section.entries.length,
+      })),
+    });
+  } catch (error) {
+    await cleanupFailedImport({ archivePath, ...partial });
+    throw error;
+  }
 }

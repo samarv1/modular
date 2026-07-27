@@ -1,11 +1,11 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getOwnerId } from "@/lib/owner";
 
-// Shared by PATCH /api/resumes/:id/composition, POST /api/resumes (duplicate),
-// and POST /api/imports (auto-created build) — every path that writes a
-// resume's section/entry tree goes through the set_resume_composition RPC
-// (supabase/migrations/0002_composition_rpc.sql) so the write is one
-// transaction, not a delete-then-insert pair the API layer could interrupt.
+// Shared by PATCH /api/resumes/:id/composition and POST /api/resumes
+// (duplicate). Every path that writes a resume's section/entry tree goes
+// through the set_resume_composition RPC (supabase/migrations/
+// 0002_composition_rpc.sql) so the write is one transaction, not a
+// delete-then-insert pair the API layer could interrupt.
 
 export interface CompositionSectionInput {
   title: string;

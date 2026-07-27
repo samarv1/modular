@@ -1,24 +1,9 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import type { BankEntryRow } from "@/lib/rows";
 
 function asRow<T>(result: { data: unknown; error: unknown }) {
   return result as { data: T[] | null; error: { message: string } | null };
-}
-
-export interface BankEntryRow {
-  id: string;
-  kind: string;
-  source_section: string;
-  display_name: string;
-  raw_latex: string;
-  tags: string[];
-  required_packages: string[];
-  source_resume_id: string | null;
-  // Embedded via the source_resume_id FK — null for orphaned entries (see
-  // resumeSourceLabel in bank-pane.tsx) or for entries imported before
-  // source_resume.display_name existed.
-  source_resume: { display_name: string | null } | null;
-  created_at: string;
 }
 
 export async function GET() {

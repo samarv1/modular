@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { CompositionError, compositionErrorStatus, setResumeComposition } from "@/lib/composition";
 import { dedupeName } from "@/lib/dedupe-name";
+import { readJsonObject } from "@/lib/api-request";
+import type { ResumeRow } from "@/lib/rows";
 
 function asRow<T>(result: { data: unknown; error: unknown }) {
   return result as { data: T | null; error: { message: string } | null };
@@ -10,16 +12,16 @@ function asRows<T>(result: { data: unknown; error: unknown }) {
   return result as { data: T[] | null; error: { message: string } | null };
 }
 
-export interface ResumeRow {
-  id: string;
-  title: string;
-  template_shell_id: string;
-  compile_status: string;
-  folder_id: string | null;
-  position_x: number;
-  position_y: number;
-  updated_at: string;
-  created_at: string;
+async function ownerHasFolder(folderId: string | null | undefined): Promise<boolean> {
+  if (folderId === null || folderId === undefined) return true;
+  const { data, error } = asRow<{ id: string }>(
+    await ownerScopedTable("resume_folder")
+      .select("id")
+      .eq("id", folderId)
+      .maybeSingle(),
+  );
+  if (error) throw new Error(error.message);
+  return data !== null;
 }
 
 // Ordered by creation, not last-edited — tabs stay put as you work instead
@@ -39,7 +41,10 @@ export async function GET() {
 // back to the owner's most recently created shell if omitted — there's no
 // shell picker UI yet, and in practice one owner has had one shell so far.
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({}));
+  const body = await readJsonObject(request);
+  if (!body) {
+    return NextResponse.json({ error: "body must be a JSON object" }, { status: 400 });
+  }
   const desiredTitle = typeof body.title === "string" && body.title.trim() ? body.title.trim() : "Untitled resume";
   const { data: existingTitles, error: existingTitlesError } = await ownerScopedTable("resume").select("title");
   if (existingTitlesError) throw new Error((existingTitlesError as { message: string }).message);
@@ -52,10 +57,23 @@ export async function POST(request: Request) {
   // omitted position defaults to the position_x/position_y column defaults
   // (0,0), same as any other insert.
   const position = {
-    positionX: typeof body.positionX === "number" ? body.positionX : undefined,
-    positionY: typeof body.positionY === "number" ? body.positionY : undefined,
+    positionX: Number.isInteger(body.positionX) ? (body.positionX as number) : undefined,
+    positionY: Number.isInteger(body.positionY) ? (body.positionY as number) : undefined,
     folderId: body.folderId === null || typeof body.folderId === "string" ? body.folderId : undefined,
   };
+  if (body.positionX !== undefined && position.positionX === undefined) {
+    return NextResponse.json({ error: "positionX must be an integer" }, { status: 400 });
+  }
+  if (body.positionY !== undefined && position.positionY === undefined) {
+    return NextResponse.json({ error: "positionY must be an integer" }, { status: 400 });
+  }
+  if (
+    body.folderId !== undefined &&
+    body.folderId !== null &&
+    typeof body.folderId !== "string"
+  ) {
+    return NextResponse.json({ error: "folderId must be a string or null" }, { status: 400 });
+  }
 
   if (typeof body.duplicateFromResumeId === "string") {
     return duplicateResume(body.duplicateFromResumeId, title, position);
@@ -72,8 +90,23 @@ async function createBlankResume(
   title: string,
   position: { positionX?: number; positionY?: number; folderId?: string | null },
 ) {
+  if (!(await ownerHasFolder(position.folderId))) {
+    return NextResponse.json({ error: "folder not found" }, { status: 422 });
+  }
+
   let shellId = templateShellId;
-  if (!shellId) {
+  if (shellId) {
+    const { data: shell, error: shellError } = asRow<{ id: string }>(
+      await ownerScopedTable("template_shell")
+        .select("id")
+        .eq("id", shellId)
+        .maybeSingle(),
+    );
+    if (shellError) throw new Error(shellError.message);
+    if (!shell) {
+      return NextResponse.json({ error: "template shell not found" }, { status: 422 });
+    }
+  } else {
     const { data: shell, error: shellError } = asRow<{ id: string }>(
       await ownerScopedTable("template_shell")
         .select("id")
@@ -112,6 +145,10 @@ async function duplicateResume(
   title: string,
   position: { positionX?: number; positionY?: number; folderId?: string | null },
 ) {
+  if (!(await ownerHasFolder(position.folderId))) {
+    return NextResponse.json({ error: "folder not found" }, { status: 422 });
+  }
+
   const { data: source, error: sourceError } = asRow<{ id: string; template_shell_id: string }>(
     await ownerScopedTable("resume").select("id, template_shell_id").eq("id", sourceResumeId).maybeSingle(),
   );
@@ -164,6 +201,10 @@ async function duplicateResume(
   try {
     await setResumeComposition(newResume!.id, compositionSections);
   } catch (err) {
+    await ownerScopedTable("resume")
+      .delete()
+      .eq("id", newResume!.id)
+      .then(() => undefined, () => undefined);
     if (err instanceof CompositionError) {
       return NextResponse.json({ error: err.message }, { status: compositionErrorStatus(err.code) });
     }

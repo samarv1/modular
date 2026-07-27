@@ -73,6 +73,13 @@ export function ResumeIcon({
         {...attributes}
         onClick={select}
         onDoubleClick={openResume}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            openResume();
+          }
+        }}
+        aria-label={`Open resume ${title}`}
         className={`cursor-pointer rounded-lg border-0 p-1 ${selected ? "bg-ink/15" : "bg-transparent"}`}
       >
         <DocumentGlyph />
@@ -80,6 +87,12 @@ export function ResumeIcon({
       <button
         onClick={select}
         onDoubleClick={openResume}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            openResume();
+          }
+        }}
         title={title}
         className={`inline-block max-w-full whitespace-normal break-words rounded px-1 text-center text-[11px] font-medium leading-tight ${
           selected ? "bg-brand text-white" : "text-ink"

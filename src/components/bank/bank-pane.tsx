@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { Eye, GripVertical, Upload as UploadIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -15,7 +15,7 @@ import {
 import { parseJakeEntryPreview } from "@/lib/jake-entry-preview";
 import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
 import { sectionGroupLabel } from "@/lib/section-label";
-import type { BankEntryRow } from "@/app/api/entries/route";
+import type { BankEntryRow } from "@/lib/rows";
 import { BANK_DRAG_PREFIX } from "@/components/dnd-ids";
 import { UploadZone, type UploadStatus, type UploadZoneHandle } from "@/components/home/upload-zone";
 
@@ -37,25 +37,26 @@ function resumeSourceLabel(entry: BankEntryRow): string {
 }
 
 export function BankPane({
-  initialEntries,
+  entries,
   usedEntryIds,
   onEntryPatched,
+  onEntriesImported,
 }: {
-  initialEntries: BankEntryRow[];
+  entries: BankEntryRow[];
   // Entries already placed in the active resume — hidden from the bank
   // entirely (see PLAN.md-adjacent: dragging into the outline pane "moves"
   // the card, not copies it) until removed via the outline's "X", which
   // drops the id from here and brings the card back.
   usedEntryIds: Set<string>;
   // Mirrors a display-name/tags edit up to the parent so the outline pane
-  // (which reads entry display data from its own copy) doesn't go stale.
+  // and bank pane render from the same canonical entry state.
   onEntryPatched?: (id: string, values: { displayName?: string; tags?: string[] }) => void;
+  onEntriesImported?: (entries: BankEntryRow[]) => void;
 }) {
-  const [entries, setEntries] = useState(initialEntries);
-  const [, startTransition] = useTransition();
   const [previewEntryId, setPreviewEntryId] = useState<string | null>(null);
   const uploadRef = useRef<UploadZoneHandle>(null);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null);
+  const patchVersions = useRef(new Map<string, number>());
   // Derived from `entries` (not a captured snapshot) so tag edits made
   // inside the modal itself show up immediately rather than going stale.
   const previewEntry = entries.find((e) => e.id === previewEntryId) ?? null;
@@ -82,27 +83,35 @@ export function BankPane({
   }, [entries, usedEntryIds]);
 
   async function patchEntry(id: string, values: { displayName?: string; tags?: string[] }) {
-    const prev = entries;
-    setEntries((cur) =>
-      cur.map((e) =>
-        e.id === id
-          ? {
-              ...e,
-              ...(values.displayName !== undefined ? { display_name: values.displayName } : {}),
-              ...(values.tags !== undefined ? { tags: values.tags } : {}),
-            }
-          : e,
-      ),
-    );
+    const previous = entries.find((entry) => entry.id === id);
+    if (!previous) return;
+    const version = (patchVersions.current.get(id) ?? 0) + 1;
+    patchVersions.current.set(id, version);
+
     onEntryPatched?.(id, values);
-    startTransition(async () => {
+    try {
       const res = await fetch(`/api/entries/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(values),
       });
-      if (!res.ok) setEntries(prev);
-    });
+      if (!res.ok) throw new Error("entry update failed");
+      const body = (await res.json()) as {
+        entry?: { display_name?: string; tags?: string[] };
+      };
+      if (patchVersions.current.get(id) !== version || !body.entry) return;
+      onEntryPatched?.(id, {
+        displayName: body.entry.display_name,
+        tags: body.entry.tags,
+      });
+    } catch {
+      if (patchVersions.current.get(id) !== version) return;
+      onEntryPatched?.(id, {
+        displayName: previous.display_name,
+        tags: previous.tags,
+      });
+      setUploadStatus({ kind: "error", message: "Entry changes could not be saved." });
+    }
   }
 
   return (
@@ -129,7 +138,7 @@ export function BankPane({
           hideDropzone
           onStatus={setUploadStatus}
           onImported={(result) => {
-            setEntries((cur) => [...result.entries, ...cur]);
+            onEntriesImported?.(result.entries);
           }}
         />
       </div>
@@ -173,7 +182,13 @@ export function BankPane({
           if (!open) setPreviewEntryId(null);
         }}
       >
-        {previewEntry && <EntryPreviewDialog entry={previewEntry} onPatch={patchEntry} />}
+        {previewEntry && (
+          <EntryPreviewDialog
+            key={`${previewEntry.id}:${previewEntry.display_name}`}
+            entry={previewEntry}
+            onPatch={patchEntry}
+          />
+        )}
       </Dialog>
     </div>
   );
@@ -193,6 +208,7 @@ function EntryPreviewDialog({
 
   const [titleDraft, setTitleDraft] = useState(entry.display_name);
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const cancelTitleRef = useRef(false);
 
   // Keep the title from growing past the modal's title row instead of
   // letting it silently scroll off — once a keystroke would overflow the
@@ -208,6 +224,11 @@ function EntryPreviewDialog({
   }, [titleDraft]);
 
   function commitTitle() {
+    if (cancelTitleRef.current) {
+      cancelTitleRef.current = false;
+      setTitleDraft(entry.display_name);
+      return;
+    }
     const trimmed = titleDraft.trim();
     if (!trimmed) {
       setTitleDraft(entry.display_name);
@@ -232,6 +253,7 @@ function EntryPreviewDialog({
             onKeyDown={(e) => {
               if (e.key === "Enter") e.currentTarget.blur();
               if (e.key === "Escape") {
+                cancelTitleRef.current = true;
                 setTitleDraft(entry.display_name);
                 e.currentTarget.blur();
               }
@@ -300,9 +322,15 @@ function EntryCard({
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(entry.display_name);
   const [hovering, setHovering] = useState(false);
+  const cancelNameRef = useRef(false);
 
   function commitName() {
     setEditingName(false);
+    if (cancelNameRef.current) {
+      cancelNameRef.current = false;
+      setName(entry.display_name);
+      return;
+    }
     const trimmed = name.trim();
     if (!trimmed) {
       setName(entry.display_name);
@@ -373,15 +401,20 @@ function EntryCard({
               onKeyDown={(e) => {
                 if (e.key === "Enter") e.currentTarget.blur();
                 if (e.key === "Escape") {
+                  cancelNameRef.current = true;
                   setName(entry.display_name);
-                  setEditingName(false);
+                  e.currentTarget.blur();
                 }
               }}
             />
           ) : (
             <span
               className="pointer-events-auto w-fit text-[12.5px] font-semibold"
-              onDoubleClick={() => setEditingName(true)}
+              onDoubleClick={() => {
+                cancelNameRef.current = false;
+                setName(entry.display_name);
+                setEditingName(true);
+              }}
               title="Double-click to rename"
             >
               {entry.display_name}
@@ -399,6 +432,7 @@ function EntryCard({
           onPointerDown={stopPreviewButtonDrag}
           data-cursor-override="pointer"
           title="Preview"
+          aria-label={`Preview ${entry.display_name}`}
           className="pointer-events-auto shrink-0 self-center cursor-pointer rounded-sm p-1 text-faint hover:bg-surface-sunken hover:text-brand"
         >
           <Eye className="pointer-events-none size-3.5" />

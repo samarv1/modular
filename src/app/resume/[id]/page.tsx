@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { ownerScopedTable } from "@/lib/db";
 import { loadResumeComposition } from "@/lib/resume-composition-query";
 import { ResumeEditor } from "@/components/resume-editor";
-import type { BankEntryRow } from "@/app/api/entries/route";
+import type { BankEntryRow } from "@/lib/rows";
 
 export default async function ResumePage({
   params,
