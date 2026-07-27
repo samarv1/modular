@@ -23,7 +23,15 @@ function argText(node: LatexNode, argIndex: number): string {
 }
 
 function entryDisplayName(node: LatexNode): string {
-  if (node.content === "resumeProjectHeading") return argText(node, 0);
+  if (node.content === "resumeProjectHeading") {
+    // arg0 is typically `\textbf{Name} $|$ \emph{tech, stack}` — plain-texting
+    // the whole group runs the name and the tech stack together. Pull just
+    // the \textbf{} part when present.
+    const arg0 = node.args?.[0]?.content ?? [];
+    const bold = arg0.find((n) => n.type === "macro" && n.content === "textbf");
+    if (bold?.args?.[0]) return collapseWhitespace(nodeToPlainText(bold.args[0].content));
+    return argText(node, 0);
+  }
   return [argText(node, 0), argText(node, 2)].filter(Boolean).join(" — ");
 }
 

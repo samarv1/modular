@@ -1,62 +1,114 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
 
 :root {
-  --paper: #f4f5f2;
-  --paper-raised: #ffffff;
-  --ink: #17181b;
-  --mute: #6b6d72;
-  --line: #dedcd6;
-  --line-strong: #c7c4bb;
-  --accent: #b8402c;
-  --accent-ink: #ffffff;
-  --ok: #3c7a5a;
-  --ok-bg: #e7efe9;
-  --warn: #b8842e;
-  --warn-bg: #f3ead9;
+  /* Modular v2 — "drafting paper" (light only, see design/direction.html) */
+  --bg: #eef1f0;
+  --surface: #ffffff;
+  --surface-sunken: #e4e9e7;
+  --ink: #12181c;
+  --muted-fg: #5b6570;
+  --faint: #8a959b;
+  --line: #cdd6d3;
+  --line-strong: #aab6b2;
+  --brand: #1f5f8b;
+  --brand-ink: #ffffff;
+  --brand-wash: #e2edf3;
+  --ok: #2f7a52;
+  --ok-bg: #e3efe7;
+  --warn: #a8631f;
+  --warn-bg: #f4e6d3;
+  --danger: #a13a2f;
+  --danger-bg: #f5e0dc;
+  --grid-line: rgba(31, 95, 139, 0.16);
 
-  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-  --font-sans: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #18191c;
-    --paper-raised: #202226;
-    --ink: #eeece7;
-    --mute: #9b9c9f;
-    --line: #333438;
-    --line-strong: #46474b;
-    --accent: #e2593f;
-    --accent-ink: #17181b;
-    --ok: #6fae8b;
-    --ok-bg: #1e2a24;
-    --warn: #d8ab5c;
-    --warn-bg: #2c2519;
-  }
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--brand);
+  --primary-foreground: var(--brand-ink);
+  --secondary: var(--surface-sunken);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface-sunken);
+  --muted-foreground: var(--muted-fg);
+  --accent: var(--brand-wash);
+  --accent-foreground: var(--brand);
+  --destructive: var(--danger);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--brand);
+  --radius: 0.5rem;
 }
 
 @theme inline {
-  --color-paper: var(--paper);
-  --color-paper-raised: var(--paper-raised);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
   --color-ink: var(--ink);
-  --color-mute: var(--mute);
+  --color-muted-fg: var(--muted-fg);
+  --color-faint: var(--faint);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
-  --color-accent: var(--accent);
-  --color-accent-ink: var(--accent-ink);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-wash: var(--brand-wash);
   --color-ok: var(--ok);
   --color-ok-bg: var(--ok-bg);
   --color-warn: var(--warn);
   --color-warn-bg: var(--warn-bg);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
 
-  --font-serif: var(--font-serif);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --font-display: var(--font-roboto-condensed);
+  --font-sans: var(--font-ibm-plex-sans);
+  --font-mono: var(--font-martian-mono);
+  /* Overleaf/compiled-LaTeX look for the resume-preview block only (see
+     EntryPreviewDialog in bank-pane.tsx) — a literal system-serif stack,
+     not a webfont, so there's no load-order/fallback risk here. */
+  --font-latex: "Times New Roman", Times, Georgia, serif;
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
 }
 
-body {
-  background: var(--paper);
-  color: var(--ink);
-  font-family: var(--font-sans);
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply text-foreground;
+    background:
+      radial-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 20px 20px,
+      var(--background);
+  }
+  html {
+    @apply font-sans;
+  }
 }
