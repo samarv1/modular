@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -14,18 +14,27 @@ import {
 import { FolderPlus, Plus } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { backToDesktopButtonClass } from "@/components/back-to-desktop";
+import { DocumentGlyph } from "@/components/home/resume-icon";
 import { FolderIcon } from "@/components/home/folder-icon";
 import { ResumeIcon } from "@/components/home/resume-icon";
-import { UploadZone } from "@/components/home/upload-zone";
+import { StaticPageIcon } from "@/components/home/static-page-icon";
+import { UploadZone, type UploadStatus } from "@/components/home/upload-zone";
 import {
   DESKTOP_BACK_DROP_ID,
   FOLDER_DRAG_PREFIX,
   FOLDER_DROP_PREFIX,
   RESUME_DRAG_PREFIX,
+  STATIC_PAGE_DRAG_PREFIX,
 } from "@/components/home/desktop-dnd-ids";
 import type { ResumeFolderRow } from "@/app/api/folders/route";
 import type { ResumeRow } from "@/app/api/resumes/route";
+import type { SourceResumeRow } from "@/app/api/source-resumes/route";
 import { nextPlacement } from "@/lib/desktop-placement";
+import { STATIC_PAGES } from "@/lib/static-pages";
+
+function pagePositionKey(id: string) {
+  return `desktop-page-position:${id}`;
+}
 
 function BackDrop({ onClick }: { onClick: () => void }) {
   const { setNodeRef, isOver } = useDroppable({ id: DESKTOP_BACK_DROP_ID });
@@ -60,8 +69,69 @@ export function Desktop({
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   // Finder-style selection: one item at a time, first click highlights and
   // the second (double) click opens.
-  const [selected, setSelected] = useState<{ kind: "folder" | "resume"; id: string } | null>(null);
+  const [selected, setSelected] = useState<{ kind: "folder" | "resume" | "page"; id: string } | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null);
+
+  // Which permanent static page (e.g. About) is open, if any — mutually
+  // exclusive with currentFolderId, its own view rather than a folder.
+  const [openPageId, setOpenPageId] = useState<string | null>(null);
+  const openPage = STATIC_PAGES.find((p) => p.id === openPageId) ?? null;
+
+  // The "Bank" static page just lists what you've uploaded (one icon per
+  // source_resume, not clickable yet — see PLAN.md Phase 7 note for the
+  // real per-upload preview this'll grow into). Not owner data Desktop
+  // already has, so it's fetched client-side — but eagerly (not only once
+  // the page is opened), since the closed folder icon also needs to know
+  // whether there's anything inside to show the non-empty "peek" glyph.
+  const [bankFiles, setBankFiles] = useState<SourceResumeRow[] | null>(null);
+  function refreshBankFiles() {
+    fetch("/api/source-resumes")
+      .then((res) => res.json())
+      .then((body) => setBankFiles(body.sourceResumes ?? []))
+      .catch(() => setBankFiles([]));
+  }
+  useEffect(() => {
+    refreshBankFiles();
+  }, []);
+
+  // Static pages aren't owner data, so their desktop position lives in
+  // localStorage, not the DB. Seeded with a grid default here (SSR-safe —
+  // no localStorage access during render) and overwritten client-side once
+  // mounted, if a saved position exists.
+  const [pagePositions, setPagePositions] = useState<Record<string, { x: number; y: number }>>(() => {
+    const initial: Record<string, { x: number; y: number }> = {};
+    STATIC_PAGES.forEach((page, i) => {
+      const pos = nextPlacement(i);
+      initial[page.id] = { x: pos.x, y: pos.y };
+    });
+    return initial;
+  });
+  useEffect(() => {
+    // One-time read-through from localStorage on mount, not a subscription —
+    // window/localStorage don't exist during SSR, so this can't happen
+    // during render without a hydration mismatch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPagePositions((cur) => {
+      const next = { ...cur };
+      for (const page of STATIC_PAGES) {
+        const raw = window.localStorage.getItem(pagePositionKey(page.id));
+        if (!raw) continue;
+        try {
+          next[page.id] = JSON.parse(raw);
+        } catch {
+          // ignore malformed/stale localStorage value, keep the grid default
+        }
+      }
+      return next;
+    });
+  }, []);
+  function patchPagePosition(id: string, x: number, y: number) {
+    setPagePositions((cur) => ({ ...cur, [id]: { x, y } }));
+    window.localStorage.setItem(pagePositionKey(id), JSON.stringify({ x, y }));
+  }
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
@@ -119,7 +189,7 @@ export function Desktop({
       }
       if (overId === DESKTOP_BACK_DROP_ID) {
         const topLevel = resumes.filter((r) => r.folder_id === null);
-        const pos = nextPlacement(topLevel.length);
+        const pos = nextPlacement(STATIC_PAGES.length + folders.length + topLevel.length);
         setResumes((cur) =>
           cur.map((r) => (r.id === resumeId ? { ...r, folder_id: null, position_x: pos.x, position_y: pos.y } : r)),
         );
@@ -145,12 +215,22 @@ export function Desktop({
       const nextY = Math.round(folder.position_y + delta.y);
       setFolders((cur) => cur.map((f) => (f.id === folderId ? { ...f, position_x: nextX, position_y: nextY } : f)));
       patchFolder(folderId, { positionX: nextX, positionY: nextY });
+      return;
+    }
+
+    if (activeId.startsWith(STATIC_PAGE_DRAG_PREFIX)) {
+      const pageId = activeId.slice(STATIC_PAGE_DRAG_PREFIX.length);
+      const pos = pagePositions[pageId];
+      if (!pos) return;
+      const nextX = Math.round(pos.x + delta.x);
+      const nextY = Math.round(pos.y + delta.y);
+      patchPagePosition(pageId, nextX, nextY);
     }
   }
 
   async function createFolder() {
     const topLevel = resumes.filter((r) => r.folder_id === null);
-    const pos = nextPlacement(folders.length + topLevel.length);
+    const pos = nextPlacement(STATIC_PAGES.length + folders.length + topLevel.length);
     const res = await fetch("/api/folders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -175,13 +255,13 @@ export function Desktop({
   // desktop underneath.
   async function createResume() {
     if (!hasTemplateShell) {
-      setError("Import a resume ZIP first — a blank build needs a template shell.");
+      setError("Import one of your resume ZIPs first");
       setTimeout(() => setError(null), 3500);
       return;
     }
     const containerCount =
       currentFolderId === null
-        ? resumes.filter((r) => r.folder_id === null).length + folders.length
+        ? STATIC_PAGES.length + resumes.filter((r) => r.folder_id === null).length + folders.length
         : resumes.filter((r) => r.folder_id === currentFolderId).length;
     const pos = nextPlacement(containerCount);
     const res = await fetch("/api/resumes", {
@@ -204,20 +284,36 @@ export function Desktop({
     <div className="flex min-h-0 flex-1 flex-col">
       <AppHeader />
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-3 py-2">
-        {currentFolder ? (
+        {openPage ? (
+          <button onClick={() => setOpenPageId(null)} className={backToDesktopButtonClass}>
+            ← Desktop
+          </button>
+        ) : (
           <>
-            <BackDrop
-              onClick={() => {
-                setSelected(null);
-                setCurrentFolderId(null);
-              }}
-            />
-            <span className="font-mono text-[11px] uppercase tracking-wide text-faint">{currentFolder.name}</span>
-            {/* Uploading only happens inside a folder — it's how new source
-                material gets added to your bank, not a top-level desktop
-                action (see the "Create" cluster below for why). */}
+            {currentFolder && (
+              <>
+                <BackDrop
+                  onClick={() => {
+                    setSelected(null);
+                    setCurrentFolderId(null);
+                  }}
+                />
+                <span className="font-mono text-[11px] uppercase tracking-wide text-faint">
+                  {currentFolder.name}
+                </span>
+              </>
+            )}
             <div className="flex items-center gap-2">
               <span className="font-mono text-[10px] uppercase tracking-wide text-faint">Create</span>
+              {!currentFolder && (
+                <button
+                  onClick={createFolder}
+                  className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
+                >
+                  <FolderPlus className="size-3" />
+                  New folder
+                </button>
+              )}
               <button
                 onClick={createResume}
                 className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
@@ -227,33 +323,20 @@ export function Desktop({
               </button>
             </div>
             <div className="h-6 w-px bg-line" />
-            <div className="flex min-w-0 flex-1 items-center gap-2">
+            <div className="flex items-center gap-2">
               <span className="font-mono text-[10px] uppercase tracking-wide text-faint">Import</span>
-              <div className="min-w-[220px] flex-1">
-                <UploadZone
-                  folderId={currentFolder.id}
-                  onUploaded={(resume) => setResumes((cur) => [...cur, resume])}
-                />
+              <div className="w-[260px]">
+                <UploadZone onImported={refreshBankFiles} onStatus={setUploadStatus} />
               </div>
+              {uploadStatus && (
+                <span
+                  className={`px-2 text-[11.5px] ${uploadStatus.kind === "success" ? "text-ok" : "text-danger"}`}
+                >
+                  {uploadStatus.message}
+                </span>
+              )}
             </div>
           </>
-        ) : (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={createFolder}
-              className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
-            >
-              <FolderPlus className="size-3" />
-              New folder
-            </button>
-            <button
-              onClick={createResume}
-              className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
-            >
-              <Plus className="size-3" />
-              New resume
-            </button>
-          </div>
         )}
         {error && <span className="px-2 text-[11.5px] text-danger">{error}</span>}
       </div>
@@ -279,53 +362,105 @@ export function Desktop({
               boxShadow: "0 4px 16px -4px rgba(18,24,28,0.18)",
             }}
           >
-            {visibleFolders.length === 0 && visibleResumes.length === 0 && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                {currentFolder ? (
-                  <button
-                    onClick={createResume}
-                    className="flex items-center gap-1.5 rounded-md border border-line-strong px-3 py-1.5 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
-                  >
-                    <Plus className="size-3" />
-                    New resume
-                  </button>
+            {openPage?.kind === "bank" ? (
+              <div className="absolute inset-0 overflow-auto p-8">
+                {bankFiles === null ? (
+                  <div className="flex h-full items-center justify-center text-[12.5px] text-faint">
+                    Loading…
+                  </div>
+                ) : bankFiles.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-[12.5px] text-faint">
+                    Nothing uploaded yet.
+                  </div>
                 ) : (
-                  <span className="text-[12.5px] text-faint">
-                    Create a folder or a resume to get started — uploads happen from inside a folder.
-                  </span>
+                  <div className="flex flex-wrap gap-4">
+                    {bankFiles.map((file) => (
+                      <div
+                        key={file.id}
+                        className="flex w-32 select-none flex-col items-center gap-1"
+                      >
+                        <DocumentGlyph />
+                        <span className="inline-block max-w-full whitespace-normal break-words px-1 text-center text-[11px] font-medium leading-tight text-ink">
+                          {file.display_name ?? file.id.slice(0, 6)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
+            ) : openPage ? (
+              <div className="absolute inset-0 overflow-auto p-8">
+                {openPage.content ? (
+                  <div className="whitespace-pre-wrap text-[13px] text-ink">{openPage.content}</div>
+                ) : (
+                  <div className="flex h-full items-center justify-center text-[12.5px] text-faint">
+                    Nothing here yet.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                {currentFolder && visibleResumes.length === 0 && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <button
+                      onClick={createResume}
+                      className="flex items-center gap-1.5 rounded-md border border-line-strong px-3 py-1.5 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
+                    >
+                      <Plus className="size-3" />
+                      New resume
+                    </button>
+                  </div>
+                )}
+                {visibleFolders.map((folder) => (
+                  <FolderIcon
+                    key={folder.id}
+                    id={folder.id}
+                    name={folder.name}
+                    x={folder.position_x}
+                    y={folder.position_y}
+                    hasContents={resumes.some((r) => r.folder_id === folder.id)}
+                    renaming={renamingFolderId === folder.id}
+                    selected={selected?.kind === "folder" && selected.id === folder.id}
+                    onSelect={() => setSelected({ kind: "folder", id: folder.id })}
+                    onStartRename={() => setRenamingFolderId(folder.id)}
+                    onCommitRename={(name) => renameFolder(folder.id, name)}
+                    onOpen={() => {
+                      setSelected(null);
+                      setCurrentFolderId(folder.id);
+                    }}
+                  />
+                ))}
+                {visibleResumes.map((resume) => (
+                  <ResumeIcon
+                    key={resume.id}
+                    id={resume.id}
+                    title={resume.title}
+                    x={resume.position_x}
+                    y={resume.position_y}
+                    selected={selected?.kind === "resume" && selected.id === resume.id}
+                    onSelect={() => setSelected({ kind: "resume", id: resume.id })}
+                  />
+                ))}
+                {currentFolderId === null &&
+                  STATIC_PAGES.map((page) => (
+                    <StaticPageIcon
+                      key={page.id}
+                      id={page.id}
+                      title={page.title}
+                      x={pagePositions[page.id]?.x ?? 24}
+                      y={pagePositions[page.id]?.y ?? 24}
+                      glyph={page.kind === "bank" ? "folder" : "document"}
+                      hasContents={page.kind === "bank" ? (bankFiles?.length ?? 0) > 0 : undefined}
+                      selected={selected?.kind === "page" && selected.id === page.id}
+                      onSelect={() => setSelected({ kind: "page", id: page.id })}
+                      onOpen={() => {
+                        setSelected(null);
+                        setOpenPageId(page.id);
+                      }}
+                    />
+                  ))}
+              </>
             )}
-            {visibleFolders.map((folder) => (
-              <FolderIcon
-                key={folder.id}
-                id={folder.id}
-                name={folder.name}
-                x={folder.position_x}
-                y={folder.position_y}
-                hasContents={resumes.some((r) => r.folder_id === folder.id)}
-                renaming={renamingFolderId === folder.id}
-                selected={selected?.kind === "folder" && selected.id === folder.id}
-                onSelect={() => setSelected({ kind: "folder", id: folder.id })}
-                onStartRename={() => setRenamingFolderId(folder.id)}
-                onCommitRename={(name) => renameFolder(folder.id, name)}
-                onOpen={() => {
-                  setSelected(null);
-                  setCurrentFolderId(folder.id);
-                }}
-              />
-            ))}
-            {visibleResumes.map((resume) => (
-              <ResumeIcon
-                key={resume.id}
-                id={resume.id}
-                title={resume.title}
-                x={resume.position_x}
-                y={resume.position_y}
-                selected={selected?.kind === "resume" && selected.id === resume.id}
-                onSelect={() => setSelected({ kind: "resume", id: resume.id })}
-              />
-            ))}
           </div>
         </div>
       </DndContext>

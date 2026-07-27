@@ -5,8 +5,7 @@ import { getOwnerId } from "@/lib/owner";
 import { detectAdapter } from "@/lib/adapters/registry";
 import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
 import { uploadArchive } from "@/lib/storage";
-import { setResumeComposition } from "@/lib/composition";
-import { nextPlacement } from "@/lib/desktop-placement";
+import { dedupeName } from "@/lib/dedupe-name";
 
 // Without generated Database types, supabase-js's select() return type
 // collapses to an unusable GenericStringError rather than a clean `any`.
@@ -25,10 +24,6 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "missing file" }, { status: 400 });
   }
-  // Upload only ever happens from inside an open folder (see UploadZone /
-  // Desktop) — the resulting resume lands there, not on the top-level desktop.
-  const folderIdField = form.get("folderId");
-  const folderId = typeof folderIdField === "string" && folderIdField ? folderIdField : null;
 
   const zipBytes = new Uint8Array(await file.arrayBuffer());
 
@@ -95,13 +90,23 @@ export async function POST(request: Request) {
     templateShellId = newShell!.id;
   }
 
+  const desiredDisplayName = file.name.replace(/\.zip$/i, "");
+  const { data: existingDisplayNames, error: existingDisplayNamesError } = await ownerScopedTable("source_resume")
+    .select("display_name")
+    .not("display_name", "is", null);
+  if (existingDisplayNamesError) throw new Error(existingDisplayNamesError.message);
+  const displayName = dedupeName(
+    desiredDisplayName,
+    ((existingDisplayNames ?? []) as unknown as { display_name: string }[]).map((r) => r.display_name),
+  );
+
   const { data: sourceResume, error: sourceResumeError } = asRow<{ id: string }>(
     await ownerScopedTable("source_resume")
       .insert({
         template_shell_id: templateShellId,
         archive_path: archivePath,
         import_status: "success",
-        display_name: file.name.replace(/\.zip$/i, ""),
+        display_name: displayName,
       })
       .select("id")
       .single(),
@@ -123,80 +128,34 @@ export async function POST(request: Request) {
     })),
   );
 
-  const { data: insertedEntries, error: entriesError } = asRows<{ id: string }>(
-    await ownerScopedTable("bank_entry").insert(entryRows).select("id"),
-  );
-  if (entriesError) throw new Error(entriesError.message);
-
-  // Desktop placement (Phase 6) — a resume auto-created by import needs a
-  // spot in whichever folder it was uploaded into, same as any other new
-  // icon, not just the position_x/position_y column defaults (which would
-  // stack every import at (0,0)).
-  let containerCount: number;
-  if (folderId) {
-    const { data: folderResumes, error: folderResumesError } = asRows<{ id: string }>(
-      await ownerScopedTable("resume").select("id").eq("folder_id", folderId),
-    );
-    if (folderResumesError) throw new Error(folderResumesError.message);
-    containerCount = folderResumes?.length ?? 0;
-  } else {
-    const { data: topLevelResumes, error: topLevelError } = asRows<{ id: string }>(
-      await ownerScopedTable("resume").select("id").is("folder_id", null),
-    );
-    if (topLevelError) throw new Error(topLevelError.message);
-    const { data: existingFolders, error: foldersError } = asRows<{ id: string }>(
-      await ownerScopedTable("resume_folder").select("id"),
-    );
-    if (foldersError) throw new Error(foldersError.message);
-    containerCount = (topLevelResumes?.length ?? 0) + (existingFolders?.length ?? 0);
-  }
-  const pos = nextPlacement(containerCount);
-
-  // Imports become saved builds matching their original structure
-  // (PLAN.md) — mirror the extracted sections into a resume right away
-  // rather than leaving the import as bank entries with nothing assembled.
-  const { data: newResume, error: resumeError } = asRow<{
+  // Same column set as GET /api/entries, so the client can prepend these
+  // straight into its BankEntryRow[] state without a refetch.
+  const { data: insertedEntries, error: entriesError } = asRows<{
     id: string;
-    title: string;
-    template_shell_id: string;
-    compile_status: string;
-    folder_id: string | null;
-    position_x: number;
-    position_y: number;
-    updated_at: string;
+    kind: string;
+    source_section: string;
+    display_name: string;
+    raw_latex: string;
+    tags: string[];
+    required_packages: string[];
+    source_resume_id: string | null;
+    source_resume: { display_name: string | null } | null;
     created_at: string;
   }>(
-    await ownerScopedTable("resume")
-      .insert({
-        title: file.name.replace(/\.zip$/i, ""),
-        template_shell_id: templateShellId,
-        source_resume_id: sourceResumeId,
-        position_x: pos.x,
-        position_y: pos.y,
-        folder_id: folderId,
-      })
-      .select("id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at")
-      .single(),
+    await ownerScopedTable("bank_entry")
+      .insert(entryRows)
+      .select(
+        "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
+      ),
   );
-  if (resumeError) throw new Error(resumeError.message);
-
-  // A single multi-row INSERT ... RETURNING preserves input order (no join
-  // or reorder happens for RETURNING on a base table), so insertedEntries
-  // lines up positionally with entryRows / the flattened section.entries.
-  let entryIdx = 0;
-  const compositionSections = extracted.sections.map((section) => ({
-    title: section.title,
-    entries: section.entries.map(() => insertedEntries![entryIdx++].id),
-  }));
-  await setResumeComposition(newResume!.id, compositionSections);
+  if (entriesError) throw new Error(entriesError.message);
 
   return NextResponse.json({
     compatible: true,
     templateShellId,
     sourceResumeId,
-    resumeId: newResume!.id,
-    resume: newResume,
     entryCount: entryRows.length,
+    entries: insertedEntries,
     sections: extracted.sections.map((s) => ({ title: s.title, entryCount: s.entries.length })),
   });
 }

@@ -10,7 +10,7 @@ import { RESUME_DRAG_PREFIX } from "@/components/home/desktop-dnd-ids";
 //
 // TODO(Phase 7 — compile worker): once resumes have a compiled PDF, render
 // an actual first-page thumbnail here instead of this blank placeholder.
-function DocumentGlyph() {
+export function DocumentGlyph() {
   return (
     <div className="relative h-16 w-12">
       <div className="absolute inset-0 rounded-[3px] bg-surface shadow-[0_2px_5px_-1px_rgba(18,24,28,0.28)]" />
@@ -66,7 +66,7 @@ export function ResumeIcon({
         transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
         zIndex: isDragging ? 10 : undefined,
       }}
-      className="flex w-24 touch-none select-none flex-col items-center gap-1"
+      className="flex w-32 touch-none select-none flex-col items-center gap-1"
     >
       <button
         {...listeners}
@@ -81,7 +81,7 @@ export function ResumeIcon({
         onClick={select}
         onDoubleClick={openResume}
         title={title}
-        className={`max-w-full truncate rounded px-1 text-center text-[11px] font-medium ${
+        className={`inline-block max-w-full whitespace-normal break-words rounded px-1 text-center text-[11px] font-medium leading-tight ${
           selected ? "bg-brand text-white" : "text-ink"
         }`}
       >

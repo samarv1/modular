@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { CompositionError, compositionErrorStatus, setResumeComposition } from "@/lib/composition";
+import { dedupeName } from "@/lib/dedupe-name";
 
 function asRow<T>(result: { data: unknown; error: unknown }) {
   return result as { data: T | null; error: { message: string } | null };
@@ -39,7 +40,13 @@ export async function GET() {
 // shell picker UI yet, and in practice one owner has had one shell so far.
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
-  const title = typeof body.title === "string" && body.title.trim() ? body.title.trim() : "Untitled resume";
+  const desiredTitle = typeof body.title === "string" && body.title.trim() ? body.title.trim() : "Untitled resume";
+  const { data: existingTitles, error: existingTitlesError } = await ownerScopedTable("resume").select("title");
+  if (existingTitlesError) throw new Error((existingTitlesError as { message: string }).message);
+  const title = dedupeName(
+    desiredTitle,
+    ((existingTitles ?? []) as unknown as { title: string }[]).map((r) => r.title),
+  );
   // Desktop placement (Phase 6) — the caller (Desktop's "New resume") computes
   // where the icon should land, and which folder (if any) it should land in;
   // omitted position defaults to the position_x/position_y column defaults

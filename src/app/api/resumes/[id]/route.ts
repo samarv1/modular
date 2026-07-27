@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { loadResumeComposition } from "@/lib/resume-composition-query";
+import { dedupeName } from "@/lib/dedupe-name";
 
 export type { ResumeSectionRow } from "@/lib/resume-composition-query";
 
@@ -29,10 +30,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const values: Record<string, unknown> = {};
   if (typeof body.title === "string") {
-    if (!body.title.trim()) {
+    const desiredTitle = body.title.trim();
+    if (!desiredTitle) {
       return NextResponse.json({ error: "title cannot be empty" }, { status: 400 });
     }
-    values.title = body.title.trim();
+    const { data: existingTitles, error: existingTitlesError } = await ownerScopedTable("resume")
+      .select("title")
+      .neq("id", id);
+    if (existingTitlesError) throw new Error((existingTitlesError as { message: string }).message);
+    values.title = dedupeName(
+      desiredTitle,
+      ((existingTitles ?? []) as unknown as { title: string }[]).map((r) => r.title),
+    );
   }
   if (typeof body.positionX === "number") values.position_x = body.positionX;
   if (typeof body.positionY === "number") values.position_y = body.positionY;

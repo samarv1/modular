@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import { dedupeName } from "@/lib/dedupe-name";
 
 // Rename and/or reposition — same partial-update shape as PATCH /api/entries/:id.
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -8,10 +9,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const values: Record<string, unknown> = {};
   if (typeof body.name === "string") {
-    if (!body.name.trim()) {
+    const desiredName = body.name.trim();
+    if (!desiredName) {
       return NextResponse.json({ error: "name cannot be empty" }, { status: 400 });
     }
-    values.name = body.name.trim();
+    const { data: existing, error: existingError } = await ownerScopedTable("resume_folder")
+      .select("name")
+      .neq("id", id);
+    if (existingError) throw new Error((existingError as { message: string }).message);
+    values.name = dedupeName(
+      desiredName,
+      ((existing ?? []) as unknown as { name: string }[]).map((f) => f.name),
+    );
   }
   if (typeof body.positionX === "number") values.position_x = body.positionX;
   if (typeof body.positionY === "number") values.position_y = body.positionY;

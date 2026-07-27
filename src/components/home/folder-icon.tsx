@@ -10,11 +10,30 @@ import { FOLDER_DRAG_PREFIX, FOLDER_DROP_PREFIX } from "@/components/home/deskto
 // to how Finder/desktop icons behave than a generic boxed glyph. The front
 // panel is fully opaque (no /alpha) — contents peek out above its top edge
 // rather than showing through a translucent front.
-function FolderGlyph({ hasContents, isOver }: { hasContents: boolean; isOver: boolean }) {
+// color defaults to the brand blue used by real (user-created) folders —
+// the Bank folder passes "warn" (amber) so it reads as a distinct, system
+// kind of folder at a glance, not just another one you made. Full class
+// strings, not string-interpolated (`bg-${color}`) — Tailwind's build-time
+// scanner needs each class to appear literally or it won't generate it.
+const FOLDER_COLOR_CLASSES = {
+  brand: { tab: "bg-brand/85", tabOver: "bg-brand", front: "bg-brand", frontOver: "bg-brand ring-2 ring-brand ring-offset-1" },
+  warn: { tab: "bg-warn/85", tabOver: "bg-warn", front: "bg-warn", frontOver: "bg-warn ring-2 ring-warn ring-offset-1" },
+} as const;
+
+export function FolderGlyph({
+  hasContents,
+  isOver,
+  color = "brand",
+}: {
+  hasContents: boolean;
+  isOver: boolean;
+  color?: keyof typeof FOLDER_COLOR_CLASSES;
+}) {
+  const classes = FOLDER_COLOR_CLASSES[color];
   return (
     <div className="relative h-14 w-16">
       {/* Back tab, part of the same folder shape */}
-      <span className={`absolute left-1 top-2 h-3 w-8 rounded-t-[3px] ${isOver ? "bg-brand" : "bg-brand/85"}`} />
+      <span className={`absolute left-1 top-2 h-3 w-8 rounded-t-[3px] ${isOver ? classes.tabOver : classes.tab}`} />
       {/* Generic stacked-papers peek, sticking out above the front panel — no
           real thumbnails yet (the compile worker that would produce a real
           preview is Phase 7, not built), just a visual cue there's content. */}
@@ -28,7 +47,7 @@ function FolderGlyph({ hasContents, isOver }: { hasContents: boolean; isOver: bo
           peeking papers and only their tops stick out above it. */}
       <span
         className={`absolute bottom-0 left-0 h-10 w-16 rounded-[4px] shadow-[0_2px_4px_-1px_rgba(18,24,28,0.25)] transition-colors ${
-          isOver ? "bg-brand ring-2 ring-brand ring-offset-1" : "bg-brand"
+          isOver ? classes.frontOver : classes.front
         }`}
       />
     </div>
@@ -79,7 +98,7 @@ export function FolderIcon({
         transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
         zIndex: isDragging ? 10 : undefined,
       }}
-      className="flex w-24 touch-none select-none flex-col items-center gap-1"
+      className="flex w-32 touch-none select-none flex-col items-center gap-1"
     >
       <button
         {...listeners}
@@ -116,7 +135,7 @@ export function FolderIcon({
           className="group relative max-w-full cursor-pointer"
         >
           <span
-            className={`block truncate rounded px-1 text-center text-[11px] font-medium ${
+            className={`inline-block max-w-full whitespace-normal break-words rounded px-1 text-center text-[11px] font-medium leading-tight ${
               selected ? "bg-brand text-white" : "text-ink"
             }`}
           >

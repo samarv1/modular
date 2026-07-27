@@ -3,5 +3,6 @@
 // outline drag-and-drop and never shares a DndContext with this one.
 export const FOLDER_DRAG_PREFIX = "folder:";
 export const RESUME_DRAG_PREFIX = "resume:";
+export const STATIC_PAGE_DRAG_PREFIX = "page:"; // permanent desktop items, e.g. About — reposition only, never filed into a folder
 export const FOLDER_DROP_PREFIX = "folder-drop:"; // dropping a resume icon onto a folder files it
 export const DESKTOP_BACK_DROP_ID = "desktop-back-drop"; // the "← Desktop" breadcrumb, while inside a folder

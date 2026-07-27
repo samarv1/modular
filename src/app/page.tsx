@@ -22,23 +22,8 @@ export default async function Home() {
     .maybeSingle();
   if (shellError) throw new Error((shellError as { message: string }).message);
 
-  let folders = (folderData ?? []) as unknown as ResumeFolderRow[];
+  const folders = (folderData ?? []) as unknown as ResumeFolderRow[];
   const resumes = (resumeData ?? []) as unknown as ResumeRow[];
-
-  // First-ever visit (no folders, no resumes, no shells yet — a genuinely
-  // blank account, not just "the user deleted their folders later") gets two
-  // starting folders to suggest how to organize uploaded vs. built resumes.
-  // Seeded empty — nothing auto-files into them, the user drags things in.
-  if (folders.length === 0 && resumes.length === 0 && !shellData) {
-    const { data: seeded, error: seedError } = await ownerScopedTable("resume_folder")
-      .insert([
-        { name: "My Resumes", position_x: 24, position_y: 24 },
-        { name: "Custom Resumes", position_x: 152, position_y: 24 },
-      ])
-      .select("id, name, position_x, position_y, created_at");
-    if (seedError) throw new Error((seedError as { message: string }).message);
-    folders = (seeded ?? []) as unknown as ResumeFolderRow[];
-  }
 
   return (
     <main className="flex min-h-0 flex-1 flex-col">

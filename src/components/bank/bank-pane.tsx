@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition, type MouseEvent, type PointerEvent } from "react";
 import { useDraggable } from "@dnd-kit/core";
-import { Eye, GripVertical } from "lucide-react";
+import { Eye, GripVertical, Upload as UploadIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -17,6 +17,7 @@ import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
 import { sectionGroupLabel } from "@/lib/section-label";
 import type { BankEntryRow } from "@/app/api/entries/route";
 import { BANK_DRAG_PREFIX } from "@/components/dnd-ids";
+import { UploadZone, type UploadStatus, type UploadZoneHandle } from "@/components/home/upload-zone";
 
 // The uploaded file's original name (source_resume.display_name), so
 // entries from different uploads read as "Ldgr" / "Dibs" instead of an id
@@ -53,6 +54,8 @@ export function BankPane({
   const [entries, setEntries] = useState(initialEntries);
   const [, startTransition] = useTransition();
   const [previewEntryId, setPreviewEntryId] = useState<string | null>(null);
+  const uploadRef = useRef<UploadZoneHandle>(null);
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null);
   // Derived from `entries` (not a captured snapshot) so tag edits made
   // inside the modal itself show up immediately rather than going stale.
   const previewEntry = entries.find((e) => e.id === previewEntryId) ?? null;
@@ -104,6 +107,32 @@ export function BankPane({
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
+      <div className="flex items-center justify-between gap-2">
+        {uploadStatus ? (
+          <span
+            className={`truncate text-[11.5px] ${uploadStatus.kind === "success" ? "text-ok" : "text-danger"}`}
+          >
+            {uploadStatus.message}
+          </span>
+        ) : (
+          <span />
+        )}
+        <button
+          onClick={() => uploadRef.current?.open()}
+          className="flex shrink-0 items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[10.5px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
+        >
+          <UploadIcon className="size-3" />
+          Upload
+        </button>
+        <UploadZone
+          ref={uploadRef}
+          hideDropzone
+          onStatus={setUploadStatus}
+          onImported={(result) => {
+            setEntries((cur) => [...result.entries, ...cur]);
+          }}
+        />
+      </div>
       <ScrollArea className="min-h-0 flex-1">
         {/* pr-4, not pr-2 — the scrollbar (base-ui ScrollArea) is an overlay
             that floats over the viewport rather than reserving its own
