@@ -5,6 +5,7 @@ import { getOwnerId } from "@/lib/owner";
 import { detectAdapter } from "@/lib/adapters/registry";
 import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
 import { uploadArchive } from "@/lib/storage";
+import { setResumeComposition } from "@/lib/composition";
 
 // Without generated Database types, supabase-js's select() return type
 // collapses to an unusable GenericStringError rather than a clean `any`.
@@ -12,6 +13,9 @@ import { uploadArchive } from "@/lib/storage";
 type Row = Record<string, unknown>;
 function asRow<T extends Row>(result: { data: unknown; error: unknown }) {
   return result as { data: T | null; error: { message: string } | null };
+}
+function asRows<T extends Row>(result: { data: unknown; error: unknown }) {
+  return result as { data: T[] | null; error: { message: string } | null };
 }
 
 export async function POST(request: Request) {
@@ -113,13 +117,41 @@ export async function POST(request: Request) {
     })),
   );
 
-  const { error: entriesError } = await ownerScopedTable("bank_entry").insert(entryRows);
-  if (entriesError) throw new Error((entriesError as { message: string }).message);
+  const { data: insertedEntries, error: entriesError } = asRows<{ id: string }>(
+    await ownerScopedTable("bank_entry").insert(entryRows).select("id"),
+  );
+  if (entriesError) throw new Error(entriesError.message);
+
+  // Imports become saved builds matching their original structure
+  // (PLAN.md) — mirror the extracted sections into a resume right away
+  // rather than leaving the import as bank entries with nothing assembled.
+  const { data: newResume, error: resumeError } = asRow<{ id: string }>(
+    await ownerScopedTable("resume")
+      .insert({
+        title: file.name.replace(/\.zip$/i, ""),
+        template_shell_id: templateShellId,
+        source_resume_id: sourceResumeId,
+      })
+      .select("id")
+      .single(),
+  );
+  if (resumeError) throw new Error(resumeError.message);
+
+  // A single multi-row INSERT ... RETURNING preserves input order (no join
+  // or reorder happens for RETURNING on a base table), so insertedEntries
+  // lines up positionally with entryRows / the flattened section.entries.
+  let entryIdx = 0;
+  const compositionSections = extracted.sections.map((section) => ({
+    title: section.title,
+    entries: section.entries.map(() => insertedEntries![entryIdx++].id),
+  }));
+  await setResumeComposition(newResume!.id, compositionSections);
 
   return NextResponse.json({
     compatible: true,
     templateShellId,
     sourceResumeId,
+    resumeId: newResume!.id,
     entryCount: entryRows.length,
     sections: extracted.sections.map((s) => ({ title: s.title, entryCount: s.entries.length })),
   });

@@ -1,14 +1,7 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useTransition,
-  type MouseEvent,
-  type PointerEvent,
-} from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type MouseEvent, type PointerEvent } from "react";
+import { useDraggable } from "@dnd-kit/core";
 import { GripVertical } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { parseJakeEntryPreview } from "@/lib/jake-entry-preview";
 import type { BankEntryRow } from "@/app/api/entries/route";
+import { BANK_DRAG_PREFIX } from "@/components/dnd-ids";
 
 // source_resume has no user-editable display name yet — the intended
 // design (default to the uploaded file's original name, user-editable
@@ -47,17 +41,21 @@ function bankSectionLabel(sectionTitle: string): string {
   return KNOWN_SECTIONS.has(sectionTitle.trim().toLowerCase()) ? sectionTitle : "Other";
 }
 
-// Deterministic per-card tilt, like cards pinned to a scratchpad rather than
-// rows in a list — same entry always gets the same tilt across re-renders.
-// Floored magnitude so no id can hash to a near-zero (visually "stuck") tilt.
-function cardTilt(id: string): number {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  const magnitude = 0.7 + (Math.abs(hash) % 100) / 100 / 1.4; // 0.7deg .. 1.4deg
-  return hash % 2 === 0 ? magnitude : -magnitude;
-}
-
-export function BankPane({ initialEntries }: { initialEntries: BankEntryRow[] }) {
+export function BankPane({
+  initialEntries,
+  usedEntryIds,
+  onEntryPatched,
+}: {
+  initialEntries: BankEntryRow[];
+  // Entries already placed in the active resume — hidden from the bank
+  // entirely (see PLAN.md-adjacent: dragging into the outline pane "moves"
+  // the card, not copies it) until removed via the outline's "X", which
+  // drops the id from here and brings the card back.
+  usedEntryIds: Set<string>;
+  // Mirrors a display-name/tags edit up to the parent so the outline pane
+  // (which reads entry display data from its own copy) doesn't go stale.
+  onEntryPatched?: (id: string, values: { displayName?: string; tags?: string[] }) => void;
+}) {
   const [entries, setEntries] = useState(initialEntries);
   const [, startTransition] = useTransition();
   const [previewEntryId, setPreviewEntryId] = useState<string | null>(null);
@@ -67,17 +65,25 @@ export function BankPane({ initialEntries }: { initialEntries: BankEntryRow[] })
 
   // Grouped by display section, in the order those sections first appear in
   // `entries` — that's upload/original-resume order (see the API route's
-  // ordering), not alphabetical. Map preserves key insertion order.
+  // ordering), not alphabetical. Heading order is derived from the full,
+  // unfiltered entry list so it stays put as cards get dragged into the
+  // outline — otherwise a heading whose first (upload-order) entry gets used
+  // would jump to wherever its next-remaining entry happens to be.
   const groups = useMemo(() => {
-    const map = new Map<string, BankEntryRow[]>();
+    const order: string[] = [];
+    const byLabel = new Map<string, BankEntryRow[]>();
     for (const entry of entries) {
       const label = bankSectionLabel(entry.source_section);
-      const group = map.get(label);
-      if (group) group.push(entry);
-      else map.set(label, [entry]);
+      if (!byLabel.has(label)) {
+        order.push(label);
+        byLabel.set(label, []);
+      }
+      if (!usedEntryIds.has(entry.id)) byLabel.get(label)!.push(entry);
     }
-    return Array.from(map.entries());
-  }, [entries]);
+    return order
+      .map((label): [string, BankEntryRow[]] => [label, byLabel.get(label)!])
+      .filter(([, group]) => group.length > 0);
+  }, [entries, usedEntryIds]);
 
   async function patchEntry(id: string, values: { displayName?: string; tags?: string[] }) {
     const prev = entries;
@@ -92,6 +98,7 @@ export function BankPane({ initialEntries }: { initialEntries: BankEntryRow[] })
           : e,
       ),
     );
+    onEntryPatched?.(id, values);
     startTransition(async () => {
       const res = await fetch(`/api/entries/${id}`, {
         method: "PATCH",
@@ -105,7 +112,7 @@ export function BankPane({ initialEntries }: { initialEntries: BankEntryRow[] })
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-4 pr-2">
+        <div className="flex flex-col gap-4 pr-2 pb-4">
           {groups.length === 0 ? (
             <div className="rounded-md border border-dashed border-line-strong p-7 text-center text-[12.5px] text-faint">
               <div className="mb-1.5 font-mono text-[10.5px] uppercase tracking-wide text-muted-fg">
@@ -235,6 +242,25 @@ function EntryPreviewDialog({
   );
 }
 
+// Static rendering of a bank card's look — used for the cross-pane
+// DragOverlay clone so a card being dragged into the outline still looks
+// like the card it came from, instead of jumping to a different style.
+export function BankEntryCardVisual({ entry }: { entry: BankEntryRow }) {
+  return (
+    <Card size="sm" className="z-20 cursor-grabbing shadow-[4px_7px_14px_-2px_rgba(18,24,28,0.28)]">
+      <CardContent className="flex flex-row items-start gap-2">
+        <GripVertical className="mt-0.5 size-3.5 shrink-0 text-line-strong" />
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <span className="w-fit text-[12.5px] font-semibold">{entry.display_name}</span>
+          <div className="font-mono text-[10px] text-faint">
+            {resumeSourceLabel(entry.source_resume_id)}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function EntryCard({
   entry,
   onPatch,
@@ -257,71 +283,51 @@ function EntryCard({
     if (trimmed !== entry.display_name) onPatch(entry.id, { displayName: trimmed });
   }
 
-  const tilt = useMemo(() => cardTilt(entry.id), [entry.id]);
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: BANK_DRAG_PREFIX + entry.id,
+  });
 
-  const [hovering, setHovering] = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const dragStart = useRef({ x: 0, y: 0 });
-  const moved = useRef(false);
-
-  function onPointerDown(e: PointerEvent<HTMLDivElement>) {
+  function onPointerDownGuarded(e: PointerEvent<HTMLDivElement>) {
     // Don't hijack typing in the name-edit / tag-draft inputs — everything
     // else on the card (including the name label) can start a drag.
     if (e.target instanceof HTMLElement && e.target.closest("input")) return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragStart.current = { x: e.clientX, y: e.clientY };
-    moved.current = false;
-    setDragging(true);
-  }
-  function onPointerMove(e: PointerEvent<HTMLDivElement>) {
-    if (!dragging) return;
-    const dx = e.clientX - dragStart.current.x;
-    const dy = e.clientY - dragStart.current.y;
-    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved.current = true;
-    setOffset({ x: dx, y: dy });
-  }
-  function endDrag(e: PointerEvent<HTMLDivElement>) {
-    if (!dragging) return;
-    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    setDragging(false);
-    setOffset({ x: 0, y: 0 }); // no drop target yet (outline pane is Phase 5) — snap back
+    listeners?.onPointerDown?.(e);
   }
   function onClick(e: MouseEvent<HTMLDivElement>) {
     if (e.target instanceof HTMLElement && e.target.closest("input")) return;
-    if (moved.current) return; // was a drag, not a click
     onOpenPreview();
   }
   function stopCardClick(e: MouseEvent) {
     e.stopPropagation();
   }
 
-  const active = dragging || hovering;
-  // Only set an inline transform while the card is actually being interacted
-  // with — leaving one on every resting card promotes each to its own GPU
-  // compositing layer, which causes stale-frame flicker on fast scroll with
-  // this many siblings.
-  const style = active
-    ? {
-        transform: `translate(${offset.x}px, ${offset.y}px) rotate(${tilt}deg)`,
-        transition: dragging
-          ? "none"
-          : "transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 150ms ease-out",
-      }
-    : undefined;
+  // While dragging, the DragOverlay clone (BankEntryCardVisual) is what
+  // follows the cursor — this source card just fades in place instead of
+  // also tracking the pointer, or the two would visibly move independently.
+  // Cursor is set inline (not just via the cursor-grab/-grabbing classes
+  // below) so it always wins regardless of any other rule targeting this
+  // card — dnd-kit's `attributes` spread includes `role="button"`, and an
+  // inline style can't lose a specificity/layer-order fight the way a class
+  // can.
+  const style = {
+    cursor: isDragging ? "grabbing" : "grab",
+    ...(isDragging ? { opacity: 0.35 } : {}),
+  };
 
   return (
     <Card
+      ref={setNodeRef}
       size="sm"
       style={style}
-      className={`touch-none select-none ${dragging ? "z-20 cursor-grabbing shadow-[4px_7px_14px_-2px_rgba(18,24,28,0.28)]" : "z-0 cursor-grab shadow-[2px_3px_0_0_var(--line-strong)] hover:z-10 hover:shadow-[3px_5px_10px_-2px_rgba(18,24,28,0.22)]"}`}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
+      // Resting shadow is soft/diffused (paper flat on the desk) rather than
+      // a hard flat offset — that flat-line look is what read as "AI card."
+      // Hover only lifts the shadow (no rotation) — the tilt-on-hover read
+      // as gimmicky once this became the drag source for a real editor.
+      className={`touch-none select-none ${isDragging ? "z-20 cursor-grabbing shadow-[4px_7px_14px_-2px_rgba(18,24,28,0.28)]" : "z-0 cursor-grab shadow-[0_1px_2px_rgba(18,24,28,0.10)] transition-shadow duration-150 ease-out hover:z-10 hover:shadow-[3px_5px_10px_-2px_rgba(18,24,28,0.22)]"}`}
+      {...attributes}
+      {...listeners}
+      onPointerDown={onPointerDownGuarded}
       onClick={onClick}
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
     >
       <CardContent className="flex flex-row items-start gap-2">
         <GripVertical className="mt-0.5 size-3.5 shrink-0 text-line-strong" />
