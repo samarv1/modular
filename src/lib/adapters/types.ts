@@ -60,9 +60,15 @@ export interface ExtractedResume {
 }
 
 export interface ResumeComposition {
+  /** The resume's designated template_shell.preamble — header/footer/macro defs. */
+  shellPreamble: string;
   sections: {
     title: string;
-    entries: { rawLatex: string }[];
+    entries: {
+      rawLatex: string;
+      kind: BankEntryKind;
+      requiredPackages: string[];
+    }[];
   }[];
 }
 

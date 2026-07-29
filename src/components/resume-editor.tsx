@@ -17,6 +17,7 @@ import { Pencil } from "lucide-react";
 import { BackToDesktopLink } from "@/components/back-to-desktop";
 import { BankPane, BankEntryCardVisual } from "@/components/bank/bank-pane";
 import { OutlinePane, type EditorSection } from "@/components/outline/outline-pane";
+import { PreviewPane } from "@/components/preview/preview-pane";
 import { BANK_DRAG_PREFIX, NEW_SECTION_DROP_ID, SECTION_APPEND_PREFIX } from "@/components/dnd-ids";
 import type { BankEntryRow } from "@/lib/rows";
 import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
@@ -83,6 +84,55 @@ function ResumeTitle({
   );
 }
 
+// Adjustable divider — wider invisible hit area than the visible line
+// itself, so it's easy to grab without needing pixel precision. Shared by
+// both dividers in the three-pane split below.
+function SplitDivider({
+  label,
+  active,
+  hovered,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onHoverChange,
+}: {
+  label: string;
+  active: boolean;
+  hovered: boolean;
+  onPointerDown: (e: PointerEvent<HTMLDivElement>) => void;
+  onPointerMove: (e: PointerEvent<HTMLDivElement>) => void;
+  onPointerUp: (e: PointerEvent<HTMLDivElement>) => void;
+  onHoverChange: (hovered: boolean) => void;
+}) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onPointerEnter={() => {
+        onHoverChange(true);
+        setHoverCursor("col-resize");
+      }}
+      onPointerLeave={() => {
+        onHoverChange(false);
+        clearHoverCursor("col-resize");
+      }}
+      style={{ cursor: active ? "col-resize" : hovered ? "col-resize" : undefined }}
+      className="group relative w-2 shrink-0 cursor-auto touch-none"
+    >
+      <div
+        className={`pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-line transition-colors ${
+          active ? "bg-brand" : "group-hover:bg-brand"
+        }`}
+      />
+    </div>
+  );
+}
+
 function toEditorSections(sections: ResumeSectionRow[]): EditorSection[] {
   return sections
     .slice()
@@ -97,11 +147,15 @@ export function ResumeEditor({
   initialEntries,
   initialResume,
   initialSections,
+  initialPdfUrl = null,
+  initialPdfDownloadUrl = null,
   initialRenaming = false,
 }: {
   initialEntries: BankEntryRow[];
   initialResume: ResumeMetaRow;
   initialSections: ResumeSectionRow[];
+  initialPdfUrl?: string | null;
+  initialPdfDownloadUrl?: string | null;
   initialRenaming?: boolean;
 }) {
   const [entries, setEntries] = useState(initialEntries);
@@ -112,6 +166,9 @@ export function ResumeEditor({
   const [sections, setSections] = useState<EditorSection[]>(toEditorSections(initialSections));
   const [addError, setAddError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState(initialPdfUrl);
+  const [pdfDownloadUrl, setPdfDownloadUrl] = useState(initialPdfDownloadUrl);
+  const [compiling, setCompiling] = useState(false);
   // A freshly-created resume (via the home page's "New resume", which
   // navigates here with ?new=1) opens straight into rename mode rather than
   // just appearing with the default "Untitled resume" title — that's the
@@ -207,6 +264,45 @@ export function ResumeEditor({
     } catch {
       setResume((cur) => ({ ...cur, title: previousTitle }));
       showAddError("Resume name could not be saved.");
+    }
+  }
+
+  // Compile is synchronous on the server (it awaits the whole Sandbox round
+  // trip), so this just awaits one fetch — no polling loop needed, the
+  // response already carries the final status.
+  async function compileResume() {
+    setCompiling(true);
+    setResume((cur) => ({ ...cur, compile_status: "compiling", compile_error: null }));
+    try {
+      const res = await fetch(`/api/resumes/${resume.id}/compile`, { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as {
+        compileStatus?: string;
+        compileError?: string;
+        pageCount?: number | null;
+        pdfUrl?: string | null;
+        pdfDownloadUrl?: string | null;
+        error?: string;
+      };
+      if (!res.ok) {
+        setResume((cur) => ({
+          ...cur,
+          compile_status: "failed",
+          compile_error: body.compileError ?? body.error ?? "Compile failed.",
+        }));
+        return;
+      }
+      setResume((cur) => ({
+        ...cur,
+        compile_status: body.compileStatus ?? "failed",
+        compile_error: body.compileError ?? null,
+        page_count: body.pageCount ?? null,
+      }));
+      setPdfUrl(body.pdfUrl ?? null);
+      setPdfDownloadUrl(body.pdfDownloadUrl ?? null);
+    } catch {
+      setResume((cur) => ({ ...cur, compile_status: "failed", compile_error: "Compile request failed." }));
+    } finally {
+      setCompiling(false);
     }
   }
 
@@ -352,25 +448,33 @@ export function ResumeEditor({
   const activeOutlineEntry =
     activeId && !activeId.startsWith(BANK_DRAG_PREFIX) ? entryById.get(activeId) : undefined;
 
-  // Adjustable bank/outline split. Clamped so neither pane can be dragged
-  // down to unusable — bounds are in percent of the split row's own width,
-  // not the viewport, so they hold up regardless of window size.
-  const [bankWidthPct, setBankWidthPct] = useState(50);
-  const [resizingSplit, setResizingSplit] = useState(false);
-  const [splitHovered, setSplitHovered] = useState(false);
+  // Adjustable bank/outline/preview split, two independent dividers. Clamped
+  // so no pane can be dragged down to unusable — bounds are in percent of
+  // the split row's own width, not the viewport, so they hold up regardless
+  // of window size.
+  const [bankWidthPct, setBankWidthPct] = useState(38);
+  const [previewWidthPct, setPreviewWidthPct] = useState(30);
+  const [resizingSplit, setResizingSplit] = useState<"bank" | "preview" | false>(false);
+  const [splitHovered, setSplitHovered] = useState<"bank" | "preview" | false>(false);
   const splitRowRef = useRef<HTMLDivElement>(null);
 
   function clampSplit(pct: number) {
-    return Math.min(75, Math.max(20, pct));
+    return Math.min(50, Math.max(15, pct));
   }
-  function onSplitPointerDown(e: PointerEvent<HTMLDivElement>) {
-    setResizingSplit(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
+  function onSplitPointerDown(which: "bank" | "preview") {
+    return (e: PointerEvent<HTMLDivElement>) => {
+      setResizingSplit(which);
+      e.currentTarget.setPointerCapture(e.pointerId);
+    };
   }
   function onSplitPointerMove(e: PointerEvent<HTMLDivElement>) {
     if (!resizingSplit || !splitRowRef.current) return;
     const rect = splitRowRef.current.getBoundingClientRect();
-    setBankWidthPct(clampSplit(((e.clientX - rect.left) / rect.width) * 100));
+    if (resizingSplit === "bank") {
+      setBankWidthPct(clampSplit(((e.clientX - rect.left) / rect.width) * 100));
+    } else {
+      setPreviewWidthPct(clampSplit(((rect.right - e.clientX) / rect.width) * 100));
+    }
   }
   function onSplitPointerUp(e: PointerEvent<HTMLDivElement>) {
     setResizingSplit(false);
@@ -437,39 +541,41 @@ export function ResumeEditor({
               }
             />
           </div>
-          {/* Adjustable divider — wider invisible hit area than the visible
-              line itself, so it's easy to grab without needing pixel precision. */}
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize bank and outline panes"
-            onPointerDown={onSplitPointerDown}
+          <SplitDivider
+            label="Resize bank and outline panes"
+            active={resizingSplit === "bank"}
+            hovered={splitHovered === "bank"}
+            onPointerDown={onSplitPointerDown("bank")}
             onPointerMove={onSplitPointerMove}
             onPointerUp={onSplitPointerUp}
-            onPointerCancel={onSplitPointerUp}
-            onPointerEnter={() => {
-              setSplitHovered(true);
-              setHoverCursor("col-resize");
-            }}
-            onPointerLeave={() => {
-              setSplitHovered(false);
-              clearHoverCursor("col-resize");
-            }}
-            style={{ cursor: resizingSplit ? "col-resize" : splitHovered ? "col-resize" : undefined }}
-            className="group relative w-2 shrink-0 cursor-auto touch-none"
-          >
-            <div
-              className={`pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-line transition-colors ${
-                resizingSplit ? "bg-brand" : "group-hover:bg-brand"
-              }`}
-            />
-          </div>
+            onHoverChange={(hovered) => setSplitHovered(hovered ? "bank" : false)}
+          />
           <div className="min-h-0 min-w-[15%] flex-1">
             <OutlinePane
               sections={sections}
               entryById={entryById}
               onChange={updateSections}
               draggedEntry={activeBankEntry}
+            />
+          </div>
+          <SplitDivider
+            label="Resize outline and preview panes"
+            active={resizingSplit === "preview"}
+            hovered={splitHovered === "preview"}
+            onPointerDown={onSplitPointerDown("preview")}
+            onPointerMove={onSplitPointerMove}
+            onPointerUp={onSplitPointerUp}
+            onHoverChange={(hovered) => setSplitHovered(hovered ? "preview" : false)}
+          />
+          <div className="min-h-0 min-w-[15%]" style={{ width: `${previewWidthPct}%` }}>
+            <PreviewPane
+              compileStatus={resume.compile_status}
+              compileError={resume.compile_error}
+              pageCount={resume.page_count}
+              pdfUrl={pdfUrl}
+              pdfDownloadUrl={pdfDownloadUrl}
+              compiling={compiling}
+              onCompile={() => void compileResume()}
             />
           </div>
         </div>

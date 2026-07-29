@@ -3,6 +3,10 @@ import { jakesResumeV1 } from "./jakes-resume-v1";
 
 export const ADAPTERS: TemplateAdapter[] = [jakesResumeV1];
 
+export function getAdapter(id: string): TemplateAdapter | null {
+  return ADAPTERS.find((a) => a.id === id) ?? null;
+}
+
 export function detectAdapter(project: ParsedLatexProject) {
   for (const adapter of ADAPTERS) {
     const result = adapter.detect(project);

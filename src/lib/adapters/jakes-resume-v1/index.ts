@@ -7,6 +7,7 @@ import type {
 } from "../types";
 import { checkJakeContract } from "./fingerprint";
 import { extractJakeResume } from "./extract";
+import { assembleJakeResume } from "./assemble";
 
 const ADAPTER_ID = "jakes-resume-v1";
 
@@ -35,10 +36,7 @@ export const jakesResumeV1: TemplateAdapter = {
     return extractJakeResume(project.source);
   },
 
-  assemble(_input: ResumeComposition): AssembledLatexProject {
-    // Phase 6: reassembles a ResumeComposition into a compile-ready document
-    // using the preamble-union rule in PLAN.md. Not needed until the compile
-    // worker exists, so left unimplemented for now.
-    throw new Error("jakes-resume-v1.assemble is not implemented yet (Phase 6)");
+  assemble(input: ResumeComposition): AssembledLatexProject {
+    return assembleJakeResume(input);
   },
 };

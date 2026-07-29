@@ -12,6 +12,9 @@ export interface ResumeMetaRow {
   title: string;
   template_shell_id: string;
   compile_status: string;
+  compile_error: string | null;
+  pdf_artifact_path: string | null;
+  page_count: number | null;
   updated_at: string;
 }
 
@@ -36,7 +39,9 @@ export async function loadResumeComposition(
 
   const { data: resume, error: resumeError } = asRow<ResumeMetaRow>(
     await ownerScopedTable("resume")
-      .select("id, title, template_shell_id, compile_status, updated_at")
+      .select(
+        "id, title, template_shell_id, compile_status, compile_error, pdf_artifact_path, page_count, updated_at",
+      )
       .eq("id", resumeId)
       .maybeSingle(),
   );

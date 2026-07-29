@@ -3,6 +3,8 @@ import { ownerScopedTable } from "@/lib/db";
 import { loadResumeComposition } from "@/lib/resume-composition-query";
 import { dedupeName } from "@/lib/dedupe-name";
 import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
+import { getSignedUrl } from "@/lib/storage";
+import { resumeDownloadFilename } from "@/lib/resume-filename";
 
 export type { ResumeSectionRow } from "@/lib/resume-composition-query";
 
@@ -18,7 +20,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "resume not found" }, { status: 404 });
   }
 
-  return NextResponse.json(composition);
+  const pdfPath = composition.resume.pdf_artifact_path;
+  const [pdfUrl, pdfDownloadUrl] = pdfPath
+    ? await Promise.all([
+        getSignedUrl(pdfPath),
+        getSignedUrl(pdfPath, 3600, { download: resumeDownloadFilename(composition.resume.title) }),
+      ])
+    : [null, null];
+
+  return NextResponse.json({ ...composition, pdfUrl, pdfDownloadUrl });
 }
 
 // Title rename, and (Phase 6) desktop placement — folder_id/position_x/

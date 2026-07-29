@@ -16,11 +16,15 @@ export async function uploadArchive(path: string, bytes: Uint8Array, contentType
   return path;
 }
 
-export async function getSignedUrl(path: string, expiresInSeconds = 3600) {
+export async function getSignedUrl(
+  path: string,
+  expiresInSeconds = 3600,
+  options?: { download?: boolean | string },
+) {
   const client = createServiceClient();
   const { data, error } = await client.storage
     .from(BUCKET)
-    .createSignedUrl(path, expiresInSeconds);
+    .createSignedUrl(path, expiresInSeconds, options?.download ? { download: true } : undefined);
   if (error) throw error;
   return data.signedUrl;
 }
