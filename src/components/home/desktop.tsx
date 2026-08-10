@@ -11,9 +11,19 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { FolderPlus, Plus } from "lucide-react";
+import { FolderPlus, Plus, Trash2 } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { backToDesktopButtonClass } from "@/components/back-to-desktop";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { DocumentGlyph } from "@/components/home/resume-icon";
 import { FolderIcon } from "@/components/home/folder-icon";
 import { ResumeIcon } from "@/components/home/resume-icon";
@@ -325,6 +335,50 @@ export function Desktop({
     patchFolder(id, { name: trimmed }, previous);
   }
 
+  // Confirmation is a controlled AlertDialog (not window.confirm) so it
+  // matches the app's own styling — deleteTarget holds what's pending
+  // confirmation, separate from `selected` so the dialog survives even if
+  // the click that opened it also happened to deselect the icon.
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: "folder" | "resume"; id: string } | null>(
+    null,
+  );
+
+  function confirmDeleteSelected() {
+    if (!selected || selected.kind === "page") return;
+    setDeleteTarget({ kind: selected.kind, id: selected.id });
+  }
+
+  // Backend orphans the folder's resumes (folder_id -> null) rather than
+  // deleting them (0003_folders.sql, ON DELETE SET NULL) — mirror that here
+  // so they reappear on the desktop instead of vanishing from local state.
+  async function performDelete() {
+    if (!deleteTarget) return;
+    const { kind, id } = deleteTarget;
+    setDeleteTarget(null);
+    setSelected((cur) => (cur?.kind === kind && cur.id === id ? null : cur));
+    try {
+      const res = await fetch(`/api/${kind === "folder" ? "folders" : "resumes"}/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok && res.status !== 404) throw new Error("delete failed");
+      if (kind === "folder") {
+        setFolders((cur) => cur.filter((f) => f.id !== id));
+        setResumes((cur) => cur.map((r) => (r.folder_id === id ? { ...r, folder_id: null } : r)));
+      } else {
+        setResumes((cur) => cur.filter((r) => r.id !== id));
+      }
+    } catch {
+      showError(kind === "folder" ? "Folder could not be deleted." : "Resume could not be deleted.");
+    }
+  }
+
+  const deleteTargetLabel =
+    deleteTarget?.kind === "folder"
+      ? folders.find((f) => f.id === deleteTarget.id)?.name
+      : deleteTarget?.kind === "resume"
+        ? resumes.find((r) => r.id === deleteTarget.id)?.title
+        : undefined;
+
   // Available both at the top level and inside a folder — creating from
   // inside a folder drops the new resume straight into it, not onto the
   // desktop underneath.
@@ -398,6 +452,14 @@ export function Desktop({
               >
                 <Plus className="size-3" />
                 New resume
+              </button>
+              <button
+                onClick={confirmDeleteSelected}
+                disabled={!selected || selected.kind === "page"}
+                className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-danger hover:text-danger disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-muted-fg"
+              >
+                <Trash2 className="size-3" />
+                Delete
               </button>
             </div>
             <div className="h-6 w-px bg-line" />
@@ -548,6 +610,33 @@ export function Desktop({
           </div>
         </div>
       </DndContext>
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {deleteTarget?.kind === "folder" ? "folder" : "resume"} &ldquo;
+              {deleteTargetLabel ?? "this item"}&rdquo;?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.kind === "folder"
+                ? "Its contents will move back to the desktop."
+                : "This can't be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={performDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
