@@ -203,6 +203,20 @@ export function ResumeEditor({
     pending: EditorSection[] | null;
   }>({ running: false, pending: null });
 
+  // Nothing persists a failed or not-yet-sent composition save across a
+  // reload — only the manual Retry button recovers it. Warn before the
+  // browser throws that state away instead of losing it silently.
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      const hasUnsavedChanges = saveError !== null || saveQueueRef.current.pending !== null;
+      if (!hasUnsavedChanges) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [saveError]);
+
   async function drainCompositionSaves() {
     const queue = saveQueueRef.current;
     if (queue.running) return;

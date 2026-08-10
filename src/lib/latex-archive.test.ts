@@ -3,6 +3,7 @@ import { join } from "path";
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 import { ArchiveRejectedError, parseLatexArchive } from "./latex-archive";
+import { MAX_ARCHIVE_FILES, MAX_LATEX_SOURCE_CHARS } from "./archive-limits";
 
 const fixture = readFileSync(join(__dirname, "../../fixtures/jakes-resume/resume.tex"), "utf8");
 
@@ -64,6 +65,26 @@ describe("parseLatexArchive", () => {
     const bytes = await zipOf({ "resume.tex": "\\documentclass{article}" });
     await expect(parseLatexArchive(bytes)).rejects.toThrow(
       "root file is missing a document environment",
+    );
+  });
+
+  it("rejects an archive with more than MAX_ARCHIVE_FILES entries", async () => {
+    const files: Record<string, string> = {
+      "resume.tex": "\\documentclass{article}\\begin{document}hi\\end{document}",
+    };
+    for (let i = 0; i < MAX_ARCHIVE_FILES; i++) files[`asset-${i}.png`] = "x";
+    const bytes = await zipOf(files);
+    await expect(parseLatexArchive(bytes)).rejects.toThrow(
+      `archive contains more than ${MAX_ARCHIVE_FILES} files`,
+    );
+  });
+
+  it("rejects a root .tex file over MAX_LATEX_SOURCE_CHARS", async () => {
+    const padding = "% ".repeat(Math.ceil(MAX_LATEX_SOURCE_CHARS / 2) + 1);
+    const source = `\\documentclass{article}${padding}\\begin{document}hi\\end{document}`;
+    const bytes = await zipOf({ "resume.tex": source });
+    await expect(parseLatexArchive(bytes)).rejects.toThrow(
+      `LaTeX source exceeds the ${MAX_LATEX_SOURCE_CHARS} character limit`,
     );
   });
 });
