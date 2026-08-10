@@ -324,9 +324,12 @@ export function ResumeEditor({
       return;
     }
 
-    const targetHasChunk = target?.entries.some((id) => entryById.get(id)?.kind === "section_chunk");
+    const targetHasChunk = target?.entries.some((id) => {
+      const kind = entryById.get(id)?.kind;
+      return kind === "section_chunk" || kind === "header_chunk";
+    });
 
-    if (target && (targetHasChunk || entry.kind === "section_chunk")) {
+    if (target && (targetHasChunk || entry.kind === "section_chunk" || entry.kind === "header_chunk")) {
       showAddError(`"${targetSectionTitle}" already holds a section that must stay by itself.`);
       return;
     }
@@ -412,10 +415,12 @@ export function ResumeEditor({
         showAddError("Entries can only be placed in their source section.");
         return;
       }
-      const targetHasChunk = targetSection.entries.some(
-        (id) => entryById.get(id)?.kind === "section_chunk",
-      );
-      if (targetHasChunk || draggedEntry.kind === "section_chunk") return;
+      const targetHasChunk = targetSection.entries.some((id) => {
+        const kind = entryById.get(id)?.kind;
+        return kind === "section_chunk" || kind === "header_chunk";
+      });
+      if (targetHasChunk || draggedEntry.kind === "section_chunk" || draggedEntry.kind === "header_chunk")
+        return;
 
       const next = sections.map((section) => ({
         ...section,

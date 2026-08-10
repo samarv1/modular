@@ -37,6 +37,11 @@ export function assembleJakeResume(input: ResumeComposition): AssembledLatexProj
 
   const body = input.sections
     .map((section) => {
+      // header_chunk is the name/contact block that precedes any \section{}
+      // in the source — render it as-is with no \section wrapper.
+      if (section.entries.length === 1 && section.entries[0].kind === "header_chunk") {
+        return section.entries[0].rawLatex;
+      }
       // section_chunk occupies its section exclusively (PLAN.md) — it's
       // opaque, already-structured content, so it's placed as-is rather
       // than wrapped in the subheading list macros.

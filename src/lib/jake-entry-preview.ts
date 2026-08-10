@@ -30,17 +30,167 @@ function readBalancedArgs(str: string, count: number): string[] {
   return args;
 }
 
-function cleanLatexText(s: string): string {
-  return s
-    .replace(/\\href\{[^}]*\}\{([^}]*)\}/g, "$1")
-    .replace(/\\textbf\{([^{}]*)\}/g, "$1")
-    .replace(/\\textit\{([^{}]*)\}/g, "$1")
-    .replace(/\\emph\{([^{}]*)\}/g, "$1")
+// Macros that wrap text we want to keep, keyed by how many required-brace
+// args they take and which of those args to keep (in order). Anything not
+// listed here still degrades gracefully — see the "unknown macro" case below
+// — so a new formatting macro doesn't need an entry to avoid leaking raw
+// LaTeX, only to be handled with full fidelity (e.g. \href keeping the link
+// text, not the URL).
+const ARG_MACROS: Record<string, { args: number; keep: number[] }> = {
+  href: { args: 2, keep: [1] },
+  textcolor: { args: 2, keep: [1] },
+  textbf: { args: 1, keep: [0] },
+  textit: { args: 1, keep: [0] },
+  emph: { args: 1, keep: [0] },
+  underline: { args: 1, keep: [0] },
+  uline: { args: 1, keep: [0] },
+  textsc: { args: 1, keep: [0] },
+  texttt: { args: 1, keep: [0] },
+  textrm: { args: 1, keep: [0] },
+  textsf: { args: 1, keep: [0] },
+  textsuperscript: { args: 1, keep: [0] },
+  textsubscript: { args: 1, keep: [0] },
+  url: { args: 1, keep: [0] },
+  hspace: { args: 1, keep: [] },
+  vspace: { args: 1, keep: [] },
+};
+
+// Declarations / spacing commands with no braced arg to worry about.
+const DROP_MACROS = new Set([
+  "small",
+  "normalsize",
+  "large",
+  "Large",
+  "footnotesize",
+  "scriptsize",
+  "noindent",
+  "centering",
+  "bfseries",
+  "itshape",
+  "quad",
+  "hfill",
+]);
+
+const ESCAPES: Record<string, string> = {
+  "&": "&",
+  "%": "%",
+  $: "$",
+  "#": "#",
+  _: "_",
+  "{": "{",
+  "}": "}",
+  "^": "^",
+  "~": "~",
+};
+
+// Brace-aware LaTeX-to-plain-text cleaner. Unlike a fixed regex whitelist,
+// this recursively descends into macro args so nested formatting (e.g.
+// \textbf{\underline{x}} or a stray grouping brace like {\underline{x}})
+// degrades correctly instead of leaking raw LaTeX into the preview.
+function cleanLatexText(input: string): string {
+  let i = 0;
+  const n = input.length;
+  let out = "";
+
+  function skipWhitespace() {
+    while (i < n && /\s/.test(input[i])) i++;
+  }
+
+  function readBalanced(): string {
+    skipWhitespace();
+    if (input[i] !== "{") return "";
+    let depth = 0;
+    const start = i;
+    for (; i < n; i++) {
+      if (input[i] === "{") depth++;
+      else if (input[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          i++;
+          break;
+        }
+      }
+    }
+    return input.slice(start + 1, i - 1);
+  }
+
+  function skipOptionalArg() {
+    skipWhitespace();
+    if (input[i] !== "[") return;
+    let depth = 0;
+    for (; i < n; i++) {
+      if (input[i] === "[") depth++;
+      else if (input[i] === "]") {
+        depth--;
+        if (depth === 0) {
+          i++;
+          break;
+        }
+      }
+    }
+  }
+
+  while (i < n) {
+    const c = input[i];
+
+    if (c === "%") {
+      while (i < n && input[i] !== "\n") i++;
+      continue;
+    }
+
+    if (c === "\\") {
+      const next = input[i + 1];
+      if (next === "\\") {
+        i += 2;
+        skipOptionalArg(); // e.g. \\[4pt]
+        out += " ";
+        continue;
+      }
+      if (next !== undefined && next in ESCAPES) {
+        out += ESCAPES[next];
+        i += 2;
+        continue;
+      }
+      const nameMatch = /^[a-zA-Z]+/.exec(input.slice(i + 1));
+      if (nameMatch) {
+        const name = nameMatch[0];
+        i += 1 + name.length;
+        skipOptionalArg();
+
+        if (name in ARG_MACROS) {
+          const spec = ARG_MACROS[name];
+          const args: string[] = [];
+          for (let a = 0; a < spec.args; a++) args.push(readBalanced());
+          for (const idx of spec.keep) out += cleanLatexText(args[idx] ?? "");
+          continue;
+        }
+        if (DROP_MACROS.has(name)) continue;
+
+        // Unknown macro: best-effort assume it wraps displayable text if
+        // followed by a brace group, otherwise just drop the macro name
+        // (e.g. \LaTeX).
+        skipWhitespace();
+        if (input[i] === "{") out += cleanLatexText(readBalanced());
+        continue;
+      }
+      // Lone backslash before something unexpected — drop it.
+      i += 1;
+      continue;
+    }
+
+    // Bare braces are just LaTeX grouping (e.g. `{\underline{x}}`) — they
+    // carry no text of their own, so make them transparent.
+    if (c === "{" || c === "}") {
+      i += 1;
+      continue;
+    }
+
+    out += c;
+    i += 1;
+  }
+
+  return out
     .replace(/\$\|\$/g, "•")
-    .replace(/\\&/g, "&")
-    .replace(/\\%/g, "%")
-    .replace(/\\\\/g, " ")
-    .replace(/~/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -60,11 +210,18 @@ function extractItems(latex: string): string[] {
 // list into one arg: \textbf{Name} $|$ \emph{Skill, Skill, Skill}. Pull the
 // bold part out as the title and the emph part out as its own line — a
 // naive whole-string clean concatenates them into one run-on title.
+function extractMacroArg(text: string, macro: string): string | undefined {
+  const idx = text.indexOf(`\\${macro}`);
+  if (idx === -1) return undefined;
+  const [arg] = readBalancedArgs(text.slice(idx + macro.length + 1), 1);
+  return arg;
+}
+
 function parseProjectTitle(titleLine: string): { title: string; meta?: string } {
-  const bold = titleLine.match(/\\textbf\{([^{}]*)\}/);
-  if (!bold) return { title: cleanLatexText(titleLine) };
-  const emph = titleLine.match(/\\emph\{([^{}]*)\}/);
-  return { title: cleanLatexText(bold[1]), meta: emph ? cleanLatexText(emph[1]) : undefined };
+  const bold = extractMacroArg(titleLine, "textbf");
+  if (bold === undefined) return { title: cleanLatexText(titleLine) };
+  const emph = extractMacroArg(titleLine, "emph");
+  return { title: cleanLatexText(bold), meta: emph !== undefined ? cleanLatexText(emph) : undefined };
 }
 
 export interface EntryPreview {

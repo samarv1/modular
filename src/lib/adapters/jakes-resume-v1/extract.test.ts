@@ -40,11 +40,18 @@ describe("jakes-resume-v1 extraction", () => {
 
   it("extracts the expected sections", () => {
     expect(resume.sections.map((s) => s.title)).toEqual([
+      "Name & Contact",
       "Education",
       "Experience",
       "Projects",
       "Technical Skills",
     ]);
+  });
+
+  it("extracts the name/contact block as a single header_chunk", () => {
+    const section = resume.sections.find((s) => s.title === "Name & Contact")!;
+    expect(section.entries).toHaveLength(1);
+    expect(section.entries[0].kind).toBe("header_chunk");
   });
 
   it("extracts 2 education entries", () => {

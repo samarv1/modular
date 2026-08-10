@@ -114,6 +114,36 @@ export function extractJakeResume(source: string): ExtractedResume {
     .map((node, index) => ({ node, index }))
     .filter(({ node }) => node.type === "macro" && node.content === "section");
 
+  // Content before the first \section{} — the name/contact block in Jake's
+  // template — isn't a section at all, so it can't go through
+  // extractSectionEntries' subheading/project boundary logic. It's captured
+  // as its own header_chunk entry instead; assemble() knows to render it
+  // without a \section{title} wrapper.
+  const headerBody = body.slice(0, sectionNodes[0]?.index ?? body.length);
+  const headerMeaningful = headerBody.filter((n) => isMeaningful(n) && n.position);
+  const headerSection =
+    headerMeaningful.length === 0
+      ? []
+      : [
+          {
+            title: "Name & Contact",
+            entries: [
+              {
+                kind: "header_chunk" as const,
+                sourceSection: "Name & Contact",
+                displayName: "Name & Contact",
+                rawLatex: source.slice(
+                  headerMeaningful[0].position!.start.offset,
+                  headerMeaningful[headerMeaningful.length - 1].position!.end.offset,
+                ),
+                sourceOffsetStart: headerMeaningful[0].position!.start.offset,
+                sourceOffsetEnd: headerMeaningful[headerMeaningful.length - 1].position!.end.offset,
+                requiredPackages,
+              },
+            ],
+          },
+        ];
+
   const sections = sectionNodes.map(({ node, index }, i) => {
     const title = collapseWhitespace(argText(node, 3));
     const bodyStart = index + 1;
@@ -129,6 +159,6 @@ export function extractJakeResume(source: string): ExtractedResume {
     fingerprint: contract.fingerprint!,
     preamble,
     requiredPackages,
-    sections,
+    sections: [...headerSection, ...sections],
   };
 }

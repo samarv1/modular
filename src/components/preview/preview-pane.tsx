@@ -108,16 +108,19 @@ export function PreviewPane({
 
       <div className="min-h-0 flex-1">
         {pdfUrl ? (
-          // view=Fit makes Chrome's built-in PDF viewer fit the whole page
-          // (not just its width), so it centers the page in its own
-          // background rather than leaving an off-center gap — that's what
-          // gives the Overleaf-style dark canvas around the page, with no
-          // extra wrapper styling needed here.
-          <iframe
-            src={`${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
-            title="Resume preview"
-            className="h-full w-full"
-          />
+          // Size the frame to the page's own letter-size aspect ratio and
+          // center it, instead of letting the iframe fill the whole pane —
+          // otherwise Chrome's PDF viewer letterboxes the page in its own
+          // dark canvas whenever the pane is taller than a single page.
+          <div className="flex h-full w-full items-start">
+            <div className="aspect-[8.5/11] w-full max-h-full">
+              <iframe
+                src={`${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
+                title="Resume preview"
+                className="h-full w-full"
+              />
+            </div>
+          </div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-[12.5px] text-faint">
             <FileText className="size-4" />

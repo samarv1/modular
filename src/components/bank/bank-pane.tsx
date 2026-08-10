@@ -24,7 +24,7 @@ import { UploadZone, type UploadStatus, type UploadZoneHandle } from "@/componen
 // fragment. Falls back to a short id for orphaned entries (source_resume_id
 // is ON DELETE SET NULL, see 0001_init.sql) or entries imported before
 // source_resume.display_name existed (0004 migration, backfilled as null).
-const GROUP_PRIORITY = ["education", "experience", "leadership", "projects"];
+const GROUP_PRIORITY = ["name & contact", "education", "experience", "leadership", "projects"];
 function groupPriority(label: string) {
   const index = GROUP_PRIORITY.indexOf(label.trim().toLowerCase());
   return index === -1 ? GROUP_PRIORITY.length : index;

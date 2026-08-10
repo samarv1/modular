@@ -46,6 +46,15 @@ describe("jakes-resume-v1 assemble", () => {
     expect(nextChars).not.toContain("resumeSubHeadingListStart");
   });
 
+  it("renders header_chunk with no \\section wrapper", () => {
+    const composition = compositionFromExtracted(resume.preamble, ["Name & Contact", "Education"]);
+    const assembled = assembleJakeResume(composition);
+
+    expect(assembled.source).not.toContain("\\section{Name & Contact}");
+    const headerEntry = resume.sections.find((s) => s.title === "Name & Contact")!.entries[0];
+    expect(assembled.source).toContain(headerEntry.rawLatex);
+  });
+
   it("does not duplicate a package already declared in the shell preamble", () => {
     const composition = compositionFromExtracted(resume.preamble, ["Education"]);
     const assembled = assembleJakeResume(composition);

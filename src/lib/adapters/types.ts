@@ -35,7 +35,7 @@ export interface DetectionResult {
   };
 }
 
-export type BankEntryKind = "subheading_entry" | "project_entry" | "section_chunk";
+export type BankEntryKind = "subheading_entry" | "project_entry" | "section_chunk" | "header_chunk";
 
 export interface ExtractedEntry {
   kind: BankEntryKind;
