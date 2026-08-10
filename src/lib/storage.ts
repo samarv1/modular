@@ -29,6 +29,13 @@ export async function getSignedUrl(
   return data.signedUrl;
 }
 
+export async function downloadArchive(path: string): Promise<Uint8Array> {
+  const client = createServiceClient();
+  const { data, error } = await client.storage.from(BUCKET).download(path);
+  if (error) throw error;
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 export async function deleteArchive(path: string) {
   const client = createServiceClient();
   const { error } = await client.storage.from(BUCKET).remove([path]);

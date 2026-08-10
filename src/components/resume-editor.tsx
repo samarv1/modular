@@ -169,6 +169,7 @@ export function ResumeEditor({
   const [pdfUrl, setPdfUrl] = useState(initialPdfUrl);
   const [pdfDownloadUrl, setPdfDownloadUrl] = useState(initialPdfDownloadUrl);
   const [compiling, setCompiling] = useState(false);
+  const [exporting, setExporting] = useState(false);
   // A freshly-created resume (via the home page's "New resume", which
   // navigates here with ?new=1) opens straight into rename mode rather than
   // just appearing with the default "Untitled resume" title — that's the
@@ -303,6 +304,26 @@ export function ResumeEditor({
       setResume((cur) => ({ ...cur, compile_status: "failed", compile_error: "Compile request failed." }));
     } finally {
       setCompiling(false);
+    }
+  }
+
+  async function exportResume() {
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/resumes/${resume.id}/export`);
+      const body = (await res.json().catch(() => ({}))) as {
+        zipDownloadUrl?: string;
+        error?: string;
+      };
+      if (!res.ok || !body.zipDownloadUrl) {
+        showAddError(body.error ?? "Export failed.");
+        return;
+      }
+      window.location.href = body.zipDownloadUrl;
+    } catch {
+      showAddError("Export request failed.");
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -581,6 +602,8 @@ export function ResumeEditor({
               pdfDownloadUrl={pdfDownloadUrl}
               compiling={compiling}
               onCompile={() => void compileResume()}
+              exporting={exporting}
+              onExport={() => void exportResume()}
             />
           </div>
         </div>
