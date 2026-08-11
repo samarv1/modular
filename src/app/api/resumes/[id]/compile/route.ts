@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
-import { getAdapter } from "@/lib/adapters/registry";
+import { getAdapterOrThrow } from "@/lib/get-adapter-or-throw";
 import { loadCompileComposition } from "@/lib/compile-composition-query";
 import { compileLatexInSandbox } from "@/lib/sandbox-compile";
 import { getSignedUrl, uploadArchive } from "@/lib/storage";
@@ -35,11 +35,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     );
   }
 
-  const adapter = getAdapter(loaded.adapterId);
-  if (!adapter) {
-    throw new Error(`unknown adapter id ${loaded.adapterId}`);
-  }
-
+  const adapter = getAdapterOrThrow(loaded.adapterId);
   const assembled = adapter.assemble(loaded.composition);
 
   const requestId = randomUUID();

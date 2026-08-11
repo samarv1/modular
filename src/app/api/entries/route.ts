@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import { asRows } from "@/lib/supabase-result";
 import type { BankEntryRow } from "@/lib/rows";
-
-function asRow<T>(result: { data: unknown; error: unknown }) {
-  return result as { data: T[] | null; error: { message: string } | null };
-}
 
 // ?sourceResumeId= scopes to one upload's entries — used by the import
 // review modal's "edit an already-imported resume" mode (see
@@ -18,7 +15,7 @@ export async function GET(request: Request) {
   );
   if (sourceResumeId) query = query.eq("source_resume_id", sourceResumeId);
 
-  const { data, error } = asRow<BankEntryRow>(
+  const { data, error } = asRows<BankEntryRow>(
     await query
       // created_at only, not source_section, so entries come back in
       // upload/original-resume order for the bank pane's section grouping,

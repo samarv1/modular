@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
+import { deleteOwnedRow } from "@/lib/delete-owned-row";
 
 // Bank entries are immutable raw LaTeX (PLAN.md) — display name and tags
 // are the only editable fields, so this is the only write path onto bank_entry.
@@ -55,26 +56,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const { data, error } = await ownerScopedTable("bank_entry")
-    .delete()
-    .eq("id", id)
-    .select("id")
-    .maybeSingle();
-
-  if (error) {
-    const status = mutationErrorStatus(error);
-    return NextResponse.json(
-      {
-        error:
-          status === 422
-            ? "This entry is used in a resume and can't be removed until it's taken out there first."
-            : error.message,
-      },
-      { status },
-    );
-  }
-  if (!data) {
-    return NextResponse.json({ error: "entry not found" }, { status: 404 });
-  }
-  return new NextResponse(null, { status: 204 });
+  return deleteOwnedRow("bank_entry", id, "entry not found", (status, message) =>
+    status === 422
+      ? "This entry is used in a resume and can't be removed until it's taken out there first."
+      : message,
+  );
 }

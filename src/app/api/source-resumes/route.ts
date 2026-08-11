@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import { asRows } from "@/lib/supabase-result";
 import type { SourceResumeRow } from "@/lib/rows";
-
-function asRows<T>(result: { data: unknown; error: unknown }) {
-  return result as { data: T[] | null; error: { message: string } | null };
-}
 
 // Backs the home page's "Bank" static page (Desktop) — a plain list of what
 // you've uploaded, not the extracted entries themselves (see GET /api/entries

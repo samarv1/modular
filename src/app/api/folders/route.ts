@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
-import { dedupeName } from "@/lib/dedupe-name";
+import { dedupedName } from "@/lib/deduped-name";
 import { readJsonObject } from "@/lib/api-request";
+import { integerFieldError } from "@/lib/field-validation";
 import type { ResumeFolderRow } from "@/lib/rows";
 
 export async function GET() {
@@ -20,21 +21,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "body must be a JSON object" }, { status: 400 });
   }
   const desiredName = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "Untitled Folder";
-  if (body.positionX !== undefined && !Number.isInteger(body.positionX)) {
-    return NextResponse.json({ error: "positionX must be an integer" }, { status: 400 });
-  }
-  if (body.positionY !== undefined && !Number.isInteger(body.positionY)) {
-    return NextResponse.json({ error: "positionY must be an integer" }, { status: 400 });
-  }
+  const fieldError = integerFieldError(body, ["positionX", "positionY"]);
+  if (fieldError) return fieldError;
   const positionX = typeof body.positionX === "number" ? body.positionX : 0;
   const positionY = typeof body.positionY === "number" ? body.positionY : 0;
 
-  const { data: existing, error: existingError } = await ownerScopedTable("resume_folder").select("name");
-  if (existingError) throw new Error((existingError as { message: string }).message);
-  const name = dedupeName(
-    desiredName,
-    ((existing ?? []) as unknown as { name: string }[]).map((f) => f.name),
-  );
+  const name = await dedupedName("resume_folder", "name", desiredName);
 
   const { data, error } = await ownerScopedTable("resume_folder")
     .insert({ name, position_x: positionX, position_y: positionY })

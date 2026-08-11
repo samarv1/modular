@@ -1,16 +1,11 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { CompositionError, compositionErrorStatus, setResumeComposition } from "@/lib/composition";
-import { dedupeName } from "@/lib/dedupe-name";
+import { dedupedName } from "@/lib/deduped-name";
 import { readJsonObject } from "@/lib/api-request";
+import { integerFieldError, nullableStringFieldError } from "@/lib/field-validation";
+import { asRow, asRows } from "@/lib/supabase-result";
 import type { ResumeRow } from "@/lib/rows";
-
-function asRow<T>(result: { data: unknown; error: unknown }) {
-  return result as { data: T | null; error: { message: string } | null };
-}
-function asRows<T>(result: { data: unknown; error: unknown }) {
-  return result as { data: T[] | null; error: { message: string } | null };
-}
 
 async function ownerHasFolder(folderId: string | null | undefined): Promise<boolean> {
   if (folderId === null || folderId === undefined) return true;
@@ -46,34 +41,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "body must be a JSON object" }, { status: 400 });
   }
   const desiredTitle = typeof body.title === "string" && body.title.trim() ? body.title.trim() : "Untitled resume";
-  const { data: existingTitles, error: existingTitlesError } = await ownerScopedTable("resume").select("title");
-  if (existingTitlesError) throw new Error((existingTitlesError as { message: string }).message);
-  const title = dedupeName(
-    desiredTitle,
-    ((existingTitles ?? []) as unknown as { title: string }[]).map((r) => r.title),
-  );
+  const title = await dedupedName("resume", "title", desiredTitle);
+
+  const fieldError = integerFieldError(body, ["positionX", "positionY"]) ?? nullableStringFieldError(body, "folderId");
+  if (fieldError) return fieldError;
+
   // Desktop placement (Phase 6) — the caller (Desktop's "New resume") computes
   // where the icon should land, and which folder (if any) it should land in;
   // omitted position defaults to the position_x/position_y column defaults
   // (0,0), same as any other insert.
   const position = {
-    positionX: Number.isInteger(body.positionX) ? (body.positionX as number) : undefined,
-    positionY: Number.isInteger(body.positionY) ? (body.positionY as number) : undefined,
+    positionX: typeof body.positionX === "number" ? body.positionX : undefined,
+    positionY: typeof body.positionY === "number" ? body.positionY : undefined,
     folderId: body.folderId === null || typeof body.folderId === "string" ? body.folderId : undefined,
   };
-  if (body.positionX !== undefined && position.positionX === undefined) {
-    return NextResponse.json({ error: "positionX must be an integer" }, { status: 400 });
-  }
-  if (body.positionY !== undefined && position.positionY === undefined) {
-    return NextResponse.json({ error: "positionY must be an integer" }, { status: 400 });
-  }
-  if (
-    body.folderId !== undefined &&
-    body.folderId !== null &&
-    typeof body.folderId !== "string"
-  ) {
-    return NextResponse.json({ error: "folderId must be a string or null" }, { status: 400 });
-  }
 
   if (typeof body.duplicateFromResumeId === "string") {
     return duplicateResume(body.duplicateFromResumeId, title, position);

@@ -5,20 +5,10 @@ import { getOwnerId } from "@/lib/owner";
 import { detectAdapter } from "@/lib/adapters/registry";
 import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
 import { deleteArchive, uploadArchive } from "@/lib/storage";
-import { dedupeName } from "@/lib/dedupe-name";
+import { dedupedName } from "@/lib/deduped-name";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
+import { asRow, asRows } from "@/lib/supabase-result";
 import type { ExtractedResume } from "@/lib/adapters/types";
-
-// Without generated Database types, supabase-js's select() return type
-// collapses to an unusable GenericStringError rather than a clean `any`.
-// This just asserts the row shape each call site already knows it needs.
-type Row = Record<string, unknown>;
-function asRow<T extends Row>(result: { data: unknown; error: unknown }) {
-  return result as { data: T | null; error: { message: string } | null };
-}
-function asRows<T extends Row>(result: { data: unknown; error: unknown }) {
-  return result as { data: T[] | null; error: { message: string } | null };
-}
 
 // Exact-duplicate matching should ignore incidental whitespace differences
 // (trailing spaces, blank lines) without doing any semantic comparison.
@@ -272,17 +262,9 @@ export async function POST(request: Request) {
 
     const desiredDisplayName =
       file.name.replace(/\.zip$/i, "").trim() || "Imported resume";
-    const { data: existingDisplayNames, error: existingDisplayNamesError } =
-      await ownerScopedTable("source_resume")
-        .select("display_name")
-        .not("display_name", "is", null);
-    if (existingDisplayNamesError) throw new Error(existingDisplayNamesError.message);
-    const displayName = dedupeName(
-      desiredDisplayName,
-      ((existingDisplayNames ?? []) as unknown as { display_name: string }[]).map(
-        (resume) => resume.display_name,
-      ),
-    );
+    const displayName = await dedupedName("source_resume", "display_name", desiredDisplayName, {
+      excludeNulls: true,
+    });
 
     const { data: sourceResume, error: sourceResumeError } = asRow<{ id: string }>(
       await ownerScopedTable("source_resume")

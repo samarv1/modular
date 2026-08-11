@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
-import { dedupeName } from "@/lib/dedupe-name";
+import { dedupedName } from "@/lib/deduped-name";
 import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
+import { integerFieldError } from "@/lib/field-validation";
+import { deleteOwnedRow } from "@/lib/delete-owned-row";
 
 // Rename and/or reposition — same partial-update shape as PATCH /api/entries/:id.
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -17,21 +19,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!desiredName) {
       return NextResponse.json({ error: "name cannot be empty" }, { status: 400 });
     }
-    const { data: existing, error: existingError } = await ownerScopedTable("resume_folder")
-      .select("name")
-      .neq("id", id);
-    if (existingError) throw new Error((existingError as { message: string }).message);
-    values.name = dedupeName(
-      desiredName,
-      ((existing ?? []) as unknown as { name: string }[]).map((f) => f.name),
-    );
+    values.name = await dedupedName("resume_folder", "name", desiredName, { excludeId: id });
   }
-  if (body.positionX !== undefined && !Number.isInteger(body.positionX)) {
-    return NextResponse.json({ error: "positionX must be an integer" }, { status: 400 });
-  }
-  if (body.positionY !== undefined && !Number.isInteger(body.positionY)) {
-    return NextResponse.json({ error: "positionY must be an integer" }, { status: 400 });
-  }
+  const fieldError = integerFieldError(body, ["positionX", "positionY"]);
+  if (fieldError) return fieldError;
   if (typeof body.positionX === "number") values.position_x = body.positionX;
   if (typeof body.positionY === "number") values.position_y = body.positionY;
   if (Object.keys(values).length === 0) {
@@ -57,19 +48,5 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 // folder orphans its resumes back onto the desktop, it never deletes them.
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { data, error } = await ownerScopedTable("resume_folder")
-    .delete()
-    .eq("id", id)
-    .select("id")
-    .maybeSingle();
-  if (error) {
-    return NextResponse.json(
-      { error: error.message },
-      { status: mutationErrorStatus(error) },
-    );
-  }
-  if (!data) {
-    return NextResponse.json({ error: "folder not found" }, { status: 404 });
-  }
-  return new NextResponse(null, { status: 204 });
+  return deleteOwnedRow("resume_folder", id, "folder not found");
 }

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { loadResumeComposition } from "@/lib/resume-composition-query";
-import { dedupeName } from "@/lib/dedupe-name";
+import { dedupedName } from "@/lib/deduped-name";
 import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
+import { integerFieldError, nullableStringFieldError } from "@/lib/field-validation";
+import { deleteOwnedRow } from "@/lib/delete-owned-row";
 import { getSignedUrl } from "@/lib/storage";
 import { resumeDownloadFilename } from "@/lib/resume-filename";
 
@@ -48,28 +50,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!desiredTitle) {
       return NextResponse.json({ error: "title cannot be empty" }, { status: 400 });
     }
-    const { data: existingTitles, error: existingTitlesError } = await ownerScopedTable("resume")
-      .select("title")
-      .neq("id", id);
-    if (existingTitlesError) throw new Error((existingTitlesError as { message: string }).message);
-    values.title = dedupeName(
-      desiredTitle,
-      ((existingTitles ?? []) as unknown as { title: string }[]).map((r) => r.title),
-    );
+    values.title = await dedupedName("resume", "title", desiredTitle, { excludeId: id });
   }
-  if (body.positionX !== undefined && !Number.isInteger(body.positionX)) {
-    return NextResponse.json({ error: "positionX must be an integer" }, { status: 400 });
-  }
-  if (body.positionY !== undefined && !Number.isInteger(body.positionY)) {
-    return NextResponse.json({ error: "positionY must be an integer" }, { status: 400 });
-  }
-  if (
-    body.folderId !== undefined &&
-    body.folderId !== null &&
-    typeof body.folderId !== "string"
-  ) {
-    return NextResponse.json({ error: "folderId must be a string or null" }, { status: 400 });
-  }
+  const fieldError = integerFieldError(body, ["positionX", "positionY"]) ?? nullableStringFieldError(body, "folderId");
+  if (fieldError) return fieldError;
   if (typeof body.folderId === "string") {
     const { data: folder, error: folderError } = await ownerScopedTable("resume_folder")
       .select("id")
@@ -109,19 +93,5 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 // bank_entry is untouched (it only references source_resume, not resume).
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { data, error } = await ownerScopedTable("resume")
-    .delete()
-    .eq("id", id)
-    .select("id")
-    .maybeSingle();
-  if (error) {
-    return NextResponse.json(
-      { error: error.message },
-      { status: mutationErrorStatus(error) },
-    );
-  }
-  if (!data) {
-    return NextResponse.json({ error: "resume not found" }, { status: 404 });
-  }
-  return new NextResponse(null, { status: 204 });
+  return deleteOwnedRow("resume", id, "resume not found");
 }

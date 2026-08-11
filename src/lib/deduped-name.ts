@@ -1,0 +1,25 @@
+import { ownerScopedTable } from "@/lib/db";
+import { dedupeName } from "@/lib/dedupe-name";
+
+/**
+ * Picks a Finder-style unique name for a new or renamed row by comparing
+ * `desired` against every other row's value in `column` (see dedupeName).
+ * Pass `excludeId` when updating an existing row so renaming it to its own
+ * current name is a no-op, not a self-collision; omit it when inserting.
+ * Pass `excludeNulls` for columns that can be null (e.g. an in-progress
+ * import's display_name) so those rows don't need to be fetched at all.
+ */
+export async function dedupedName(
+  table: string,
+  column: string,
+  desired: string,
+  options: { excludeId?: string; excludeNulls?: boolean } = {},
+): Promise<string> {
+  let query = ownerScopedTable(table).select(column);
+  if (options.excludeId) query = query.neq("id", options.excludeId);
+  if (options.excludeNulls) query = query.not(column, "is", null);
+  const { data, error } = await query;
+  if (error) throw new Error((error as { message: string }).message);
+  const existingNames = ((data ?? []) as unknown as Record<string, string>[]).map((row) => row[column]);
+  return dedupeName(desired, existingNames);
+}
