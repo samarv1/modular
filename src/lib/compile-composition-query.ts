@@ -1,12 +1,5 @@
-import { ownerScopedTable } from "@/lib/db";
+import { asRow, asRows, ownerScopedTable } from "@/lib/db";
 import type { BankEntryKind, ResumeComposition } from "@/lib/adapters/types";
-
-function asRow<T>(result: { data: unknown; error: unknown }) {
-  return result as { data: T | null; error: { message: string } | null };
-}
-function asRows<T>(result: { data: unknown; error: unknown }) {
-  return result as { data: T[] | null; error: { message: string } | null };
-}
 
 // Compile-specific composition load: unlike loadResumeComposition (the
 // outline pane's shape, which cross-references bank entries already held

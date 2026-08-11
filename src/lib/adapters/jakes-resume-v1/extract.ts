@@ -2,16 +2,7 @@ import type { ExtractedEntry, ExtractedResume, LatexNode } from "../types";
 import { checkJakeContract } from "./fingerprint";
 import { collapseWhitespace, documentBody, nodeToPlainText, parseJakeSource } from "./parse";
 import { ENTRY_BOUNDARY_MACROS } from "./macros";
-
-const USEPACKAGE_RE = /\\usepackage(?:\[[^\]]*\])?\{([^}]+)\}/g;
-
-function extractPackages(preamble: string): string[] {
-  const packages = new Set<string>();
-  for (const match of preamble.matchAll(USEPACKAGE_RE)) {
-    for (const name of match[1].split(",")) packages.add(name.trim());
-  }
-  return [...packages];
-}
+import { declaredPackages } from "./packages";
 
 function isMeaningful(node: LatexNode): boolean {
   return node.type !== "whitespace" && node.type !== "parbreak" && node.type !== "comment";
@@ -108,7 +99,7 @@ export function extractJakeResume(source: string): ExtractedResume {
     (n) => n.type === "environment" && n.env === "document",
   )?.position?.start.offset;
   const preamble = source.slice(0, docEnvOffset ?? 0);
-  const requiredPackages = extractPackages(preamble);
+  const requiredPackages = declaredPackages(preamble);
 
   const sectionNodes = body
     .map((node, index) => ({ node, index }))

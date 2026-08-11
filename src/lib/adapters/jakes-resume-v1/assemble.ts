@@ -1,14 +1,5 @@
 import type { AssembledLatexProject, ResumeComposition } from "../types";
-
-const USEPACKAGE_RE = /\\usepackage(?:\[[^\]]*\])?\{([^}]+)\}/g;
-
-function declaredPackages(preamble: string): Set<string> {
-  const packages = new Set<string>();
-  for (const match of preamble.matchAll(USEPACKAGE_RE)) {
-    for (const name of match[1].split(",")) packages.add(name.trim());
-  }
-  return packages;
-}
+import { declaredPackages } from "./packages";
 
 /**
  * Preamble-union rule (PLAN.md): the designated shell's preamble is the
@@ -20,7 +11,7 @@ function declaredPackages(preamble: string): Set<string> {
  * options its own line carries.
  */
 export function assembleJakeResume(input: ResumeComposition): AssembledLatexProject {
-  const declared = declaredPackages(input.shellPreamble);
+  const declared = new Set(declaredPackages(input.shellPreamble));
   const missing = new Set<string>();
   for (const section of input.sections) {
     for (const entry of section.entries) {

@@ -1,6 +1,15 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getOwnerId } from "@/lib/owner";
 
+// supabase-js returns loosely-typed results here (see the `as any` note on
+// select() below); these cast a result back to the shape the caller expects.
+export function asRow<T>(result: { data: unknown; error: unknown }) {
+  return result as { data: T | null; error: { message: string } | null };
+}
+export function asRows<T>(result: { data: unknown; error: unknown }) {
+  return result as { data: T[] | null; error: { message: string } | null };
+}
+
 // Every table in 0001_init.sql carries owner_id. Since RLS is off (server
 // uses the service-role key), this wrapper is what actually enforces
 // isolation — route handlers should read/write through this, not a bare

@@ -1,11 +1,5 @@
-import { ownerScopedTable } from "@/lib/db";
-
-function asRow<T>(result: { data: unknown; error: unknown }) {
-  return result as { data: T | null; error: { message: string } | null };
-}
-function asRows<T>(result: { data: unknown; error: unknown }) {
-  return result as { data: T[] | null; error: { message: string } | null };
-}
+import { asRow, asRows, ownerScopedTable } from "@/lib/db";
+import { isUuid } from "@/lib/api-request";
 
 export interface ResumeMetaRow {
   id: string;
@@ -27,15 +21,13 @@ export interface ResumeSectionRow {
 
 // Shared by GET /api/resumes/:id and page.tsx's initial server-rendered
 // load, so the two don't drift on what "a resume's composition" means.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export async function loadResumeComposition(
   resumeId: string,
 ): Promise<{ resume: ResumeMetaRow; sections: ResumeSectionRow[] } | null> {
   // A malformed id (not even UUID-shaped) should 404 like any other
   // nonexistent resume, not surface Postgres's "invalid input syntax for
   // type uuid" as a raw 500 — /resume/[id] can be hit with any route param.
-  if (!UUID_RE.test(resumeId)) return null;
+  if (!isUuid(resumeId)) return null;
 
   const { data: resume, error: resumeError } = asRow<ResumeMetaRow>(
     await ownerScopedTable("resume")

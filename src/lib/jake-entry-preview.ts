@@ -4,6 +4,24 @@
 // it never touches raw_latex, which stays immutable and is never
 // regenerated from a parse (see PLAN.md).
 
+// str[start] must be "{". Returns the group's inner content and the index
+// just past its closing brace (matching depth, so nested braces are safe).
+function readBraceGroup(str: string, start: number): { content: string; end: number } {
+  let depth = 0;
+  let i = start;
+  for (; i < str.length; i++) {
+    if (str[i] === "{") depth++;
+    else if (str[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        i++;
+        break;
+      }
+    }
+  }
+  return { content: str.slice(start + 1, i - 1), end: i };
+}
+
 function readBalancedArgs(str: string, count: number): string[] {
   const args: string[] = [];
   let i = 0;
@@ -13,19 +31,9 @@ function readBalancedArgs(str: string, count: number): string[] {
       args.push("");
       continue;
     }
-    const start = i;
-    let depth = 0;
-    for (; i < str.length; i++) {
-      if (str[i] === "{") depth++;
-      else if (str[i] === "}") {
-        depth--;
-        if (depth === 0) {
-          i++;
-          break;
-        }
-      }
-    }
-    args.push(str.slice(start + 1, i - 1));
+    const group = readBraceGroup(str, i);
+    args.push(group.content);
+    i = group.end;
   }
   return args;
 }
@@ -99,19 +107,9 @@ function cleanLatexText(input: string): string {
   function readBalanced(): string {
     skipWhitespace();
     if (input[i] !== "{") return "";
-    let depth = 0;
-    const start = i;
-    for (; i < n; i++) {
-      if (input[i] === "{") depth++;
-      else if (input[i] === "}") {
-        depth--;
-        if (depth === 0) {
-          i++;
-          break;
-        }
-      }
-    }
-    return input.slice(start + 1, i - 1);
+    const group = readBraceGroup(input, i);
+    i = group.end;
+    return group.content;
   }
 
   function skipOptionalArg() {
