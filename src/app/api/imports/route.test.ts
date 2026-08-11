@@ -1,12 +1,34 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import JSZip from "jszip";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
-import { POST } from "./route";
+import { ownerScopedTable } from "@/lib/db";
+
+vi.mock("@/lib/storage", () => ({
+  uploadArchive: vi.fn().mockResolvedValue(undefined),
+  deleteArchive: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Import after the mock above is registered so the route picks it up.
+const { POST } = await import("./route");
+
+const fixture = readFileSync(
+  join(__dirname, "../../../../fixtures/jakes-resume/resume.tex"),
+  "utf8",
+);
 
 function requestWithFile(file: File) {
   const form = new FormData();
   form.set("file", file);
   return new Request("http://localhost/api/imports", { method: "POST", body: form });
+}
+
+async function zipFileOf(tex: string, name: string) {
+  const zip = new JSZip();
+  zip.file("resume.tex", tex);
+  const bytes = await zip.generateAsync({ type: "arraybuffer" });
+  return new File([bytes], name);
 }
 
 describe("POST /api/imports — pre-DB rejections", () => {
@@ -48,5 +70,63 @@ describe("POST /api/imports — pre-DB rejections", () => {
     const file = new File([bytes], "resume.zip");
     const res = await POST(requestWithFile(file));
     expect(res.status).toBe(422);
+  });
+});
+
+describe("POST /api/imports — duplicate entry detection", () => {
+  const sourceResumeIds: string[] = [];
+  let templateShellId: string | undefined;
+
+  afterAll(async () => {
+    for (const id of sourceResumeIds) {
+      await ownerScopedTable("bank_entry").delete().eq("source_resume_id", id);
+      await ownerScopedTable("source_resume").delete().eq("id", id);
+    }
+    if (templateShellId) {
+      await ownerScopedTable("template_shell").delete().eq("id", templateShellId);
+    }
+  });
+
+  it("imports every entry on the first upload of a resume", async () => {
+    const res = await POST(requestWithFile(await zipFileOf(fixture, "resume.zip")));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.compatible).toBe(true);
+    expect(body.entryCount).toBeGreaterThan(0);
+    sourceResumeIds.push(body.sourceResumeId);
+    templateShellId = body.templateShellId;
+  });
+
+  it("imports zero new entries when the identical resume is uploaded again", async () => {
+    const res = await POST(requestWithFile(await zipFileOf(fixture, "resume-copy.zip")));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.compatible).toBe(true);
+    expect(body.entryCount).toBe(0);
+    expect(body.entries).toEqual([]);
+    sourceResumeIds.push(body.sourceResumeId);
+
+    // Confirm no duplicate rows actually landed in bank_entry.
+    const { data: allEntries, error } = await ownerScopedTable("bank_entry")
+      .select("raw_latex")
+      .in("source_resume_id", sourceResumeIds);
+    if (error) throw new Error(error.message);
+    const rawLatexValues = (allEntries ?? []).map((row) => (row as { raw_latex: string }).raw_latex);
+    expect(new Set(rawLatexValues).size).toBe(rawLatexValues.length);
+  });
+
+  it("only inserts the entries that actually differ, when a resume is partly new", async () => {
+    // Changes exactly one project entry's raw_latex; every other entry
+    // (header, education, experience, the other project, skills) is still
+    // an exact match against what's already in the bank.
+    const modifiedFixture = fixture.replace("Gitlytics", "Gitlytics2");
+    const res = await POST(requestWithFile(await zipFileOf(modifiedFixture, "resume-modified.zip")));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.compatible).toBe(true);
+    expect(body.entryCount).toBe(1);
+    expect(body.entries).toHaveLength(1);
+    expect(body.entries[0].raw_latex).toContain("Gitlytics2");
+    sourceResumeIds.push(body.sourceResumeId);
   });
 });

@@ -19,6 +19,12 @@ function asRows<T extends Row>(result: { data: unknown; error: unknown }) {
   return result as { data: T[] | null; error: { message: string } | null };
 }
 
+// Exact-duplicate matching should ignore incidental whitespace differences
+// (trailing spaces, blank lines) without doing any semantic comparison.
+function normalizeLatex(raw: string): string {
+  return raw.trim().replace(/\s+/g, " ");
+}
+
 async function cleanupFailedImport({
   archivePath,
   sourceResumeId,
@@ -181,6 +187,24 @@ export async function POST(request: Request) {
     partial.sourceResumeId = sourceResumeId;
     for (const entryRow of entryRows) entryRow.source_resume_id = sourceResumeId;
 
+    // Exact-duplicate detection: an entry is a duplicate if its raw_latex
+    // (normalized) matches one already in this owner's bank, or another
+    // entry earlier in this same upload batch.
+    const { data: existingLatex, error: existingLatexError } =
+      await ownerScopedTable("bank_entry").select("raw_latex");
+    if (existingLatexError) throw new Error(existingLatexError.message);
+    const seen = new Set(
+      ((existingLatex ?? []) as unknown as { raw_latex: string }[]).map((row) =>
+        normalizeLatex(row.raw_latex),
+      ),
+    );
+    const dedupedEntryRows = entryRows.filter((entryRow) => {
+      const normalized = normalizeLatex(entryRow.raw_latex as string);
+      if (seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+
     // Same column set as GET /api/entries, so the client can prepend these
     // straight into its BankEntryRow[] state without a refetch.
     const { data: insertedEntries, error: entriesError } = asRows<{
@@ -195,11 +219,13 @@ export async function POST(request: Request) {
       source_resume: { display_name: string | null } | null;
       created_at: string;
     }>(
-      await ownerScopedTable("bank_entry")
-        .insert(entryRows)
-        .select(
-          "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
-        ),
+      dedupedEntryRows.length === 0
+        ? { data: [], error: null }
+        : await ownerScopedTable("bank_entry")
+            .insert(dedupedEntryRows)
+            .select(
+              "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
+            ),
     );
     if (entriesError) throw new Error(entriesError.message);
 
@@ -207,7 +233,7 @@ export async function POST(request: Request) {
       compatible: true,
       templateShellId,
       sourceResumeId,
-      entryCount: entryRows.length,
+      entryCount: dedupedEntryRows.length,
       entries: insertedEntries,
       sections: extracted.sections.map((section) => ({
         title: section.title,
