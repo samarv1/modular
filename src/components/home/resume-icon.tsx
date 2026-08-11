@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useDraggable } from "@dnd-kit/core";
 import { RESUME_DRAG_PREFIX } from "@/components/home/desktop-dnd-ids";
+import { DesktopIconSlot, IconGlyphButton, IconLabel } from "@/components/home/desktop-icon";
 
 // A drawn blank-page shape (with a folded corner, Finder's generic-document
 // look), not a bordered card with a line icon inside — dragging moves the
@@ -57,49 +58,17 @@ export function ResumeIcon({
   }
 
   return (
-    <div
-      ref={setNodeRef}
-      style={{
-        position: "absolute",
-        left: x,
-        top: y,
-        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-        zIndex: isDragging ? 10 : undefined,
-      }}
-      className="flex w-32 touch-none select-none flex-col items-center gap-1"
-    >
-      <button
-        {...listeners}
-        {...attributes}
-        onClick={select}
-        onDoubleClick={openResume}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            openResume();
-          }
-        }}
-        aria-label={`Open resume ${title}`}
-        className={`cursor-pointer rounded-lg border-0 p-1 ${selected ? "bg-ink/15" : "bg-transparent"}`}
+    <DesktopIconSlot x={x} y={y} transform={transform} isDragging={isDragging} setRef={setNodeRef}>
+      <IconGlyphButton
+        onSelect={select}
+        onOpen={openResume}
+        ariaLabel={`Open resume ${title}`}
+        selected={selected}
+        dragProps={{ ...listeners, ...attributes }}
       >
         <DocumentGlyph />
-      </button>
-      <button
-        onClick={select}
-        onDoubleClick={openResume}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            openResume();
-          }
-        }}
-        title={title}
-        className={`inline-block max-w-full whitespace-normal break-words rounded px-1 text-center text-[11px] font-medium leading-tight ${
-          selected ? "bg-brand text-white" : "text-ink"
-        }`}
-      >
-        {title}
-      </button>
-    </div>
+      </IconGlyphButton>
+      <IconLabel title={title} selected={selected} onSelect={select} onOpen={openResume} />
+    </DesktopIconSlot>
   );
 }

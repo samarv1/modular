@@ -11,7 +11,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { FolderPlus, Plus, Trash2, Upload } from "lucide-react";
+import { FolderPlus, Plus, Trash2, Upload, type LucideIcon } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { backToDesktopButtonClass } from "@/components/back-to-desktop";
 import {
@@ -28,6 +28,7 @@ import { DocumentGlyph } from "@/components/home/resume-icon";
 import { FolderIcon } from "@/components/home/folder-icon";
 import { ResumeIcon } from "@/components/home/resume-icon";
 import { StaticPageIcon } from "@/components/home/static-page-icon";
+import { IconGlyphButton, IconLabel } from "@/components/home/desktop-icon";
 import { ImportReviewModal } from "@/components/home/import-review-modal";
 import {
   DESKTOP_BACK_DROP_ID,
@@ -59,37 +60,46 @@ function BankFileIcon({
 }) {
   return (
     <div className="flex w-32 select-none flex-col items-center gap-1">
-      <button
-        onClick={onSelect}
-        onDoubleClick={onOpen}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            onOpen();
-          }
-        }}
-        aria-label={`Edit uploaded resume ${title}`}
-        className={`cursor-pointer rounded-lg border-0 p-1 ${selected ? "bg-ink/15" : "bg-transparent"}`}
+      <IconGlyphButton
+        onSelect={onSelect}
+        onOpen={onOpen}
+        ariaLabel={`Edit uploaded resume ${title}`}
+        selected={selected}
       >
         <DocumentGlyph />
-      </button>
-      <button
-        onClick={onSelect}
-        onDoubleClick={onOpen}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            onOpen();
-          }
-        }}
-        title={title}
-        className={`inline-block max-w-full whitespace-normal break-words rounded px-1 text-center text-[11px] font-medium leading-tight ${
-          selected ? "bg-brand text-white" : "text-ink"
-        }`}
-      >
-        {title}
-      </button>
+      </IconGlyphButton>
+      <IconLabel title={title} selected={selected} onSelect={onSelect} onOpen={onOpen} />
     </div>
+  );
+}
+
+// Shared look for the desktop's small text toolbar actions (New folder, New
+// resume, Delete, Import) — only the icon/label/tone/enabled state differ
+// between them.
+function ToolbarButton({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+  tone = "brand",
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: "brand" | "danger";
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg ${
+        tone === "danger" ? "hover:border-danger hover:text-danger" : "hover:border-brand hover:text-brand"
+      } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-muted-fg`}
+    >
+      <Icon className="size-3" />
+      {label}
+    </button>
   );
 }
 
@@ -495,14 +505,13 @@ export function Desktop({
               ← Desktop
             </button>
             {openPage.kind === "bank" && (
-              <button
+              <ToolbarButton
+                icon={Trash2}
+                label="Delete"
+                tone="danger"
                 onClick={confirmDeleteSelected}
                 disabled={!selected || selected.kind !== "bank"}
-                className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-danger hover:text-danger disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-muted-fg"
-              >
-                <Trash2 className="size-3" />
-                Delete
-              </button>
+              />
             )}
           </>
         ) : (
@@ -522,42 +531,25 @@ export function Desktop({
             )}
             <div className="flex items-center gap-2">
               <span className="font-mono text-[10px] uppercase tracking-wide text-faint">Create</span>
-              {!currentFolder && (
-                <button
-                  onClick={createFolder}
-                  className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
-                >
-                  <FolderPlus className="size-3" />
-                  New folder
-                </button>
-              )}
-              <button
-                onClick={createResume}
-                className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
-              >
-                <Plus className="size-3" />
-                New resume
-              </button>
-              <button
+              {!currentFolder && <ToolbarButton icon={FolderPlus} label="New folder" onClick={createFolder} />}
+              <ToolbarButton icon={Plus} label="New resume" onClick={createResume} />
+              <ToolbarButton
+                icon={Trash2}
+                label="Delete"
+                tone="danger"
                 onClick={confirmDeleteSelected}
                 disabled={!selected || selected.kind === "page"}
-                className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-danger hover:text-danger disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-muted-fg"
-              >
-                <Trash2 className="size-3" />
-                Delete
-              </button>
+              />
             </div>
             <div className="h-6 w-px bg-line" />
-            <button
+            <ToolbarButton
+              icon={Upload}
+              label="Import"
               onClick={() => {
                 setEditingSourceResume(null);
                 setImportModalOpen(true);
               }}
-              className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
-            >
-              <Upload className="size-3" />
-              Import
-            </button>
+            />
           </>
         )}
         {error && <span className="px-2 text-[11.5px] text-danger">{error}</span>}

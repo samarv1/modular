@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { Pencil } from "lucide-react";
 import { FOLDER_DRAG_PREFIX, FOLDER_DROP_PREFIX } from "@/components/home/desktop-dnd-ids";
+import { DesktopIconSlot, IconGlyphButton } from "@/components/home/desktop-icon";
 
 // A drawn folder shape (back tab + opaque front panel), not a bordered card
 // with a line icon inside — dragging moves the actual folder shape, closer
@@ -87,36 +88,25 @@ export function FolderIcon({
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: FOLDER_DROP_PREFIX + id });
 
   return (
-    <div
-      ref={(node) => {
+    <DesktopIconSlot
+      x={x}
+      y={y}
+      transform={transform}
+      isDragging={isDragging}
+      setRef={(node) => {
         setDragRef(node);
         setDropRef(node);
       }}
-      style={{
-        position: "absolute",
-        left: x,
-        top: y,
-        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-        zIndex: isDragging ? 10 : undefined,
-      }}
-      className="flex w-32 touch-none select-none flex-col items-center gap-1"
     >
-      <button
-        {...listeners}
-        {...attributes}
-        onClick={onSelect}
-        onDoubleClick={onOpen}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            onOpen();
-          }
-        }}
-        aria-label={`Open folder ${name}`}
-        className={`cursor-pointer rounded-lg border-0 p-1 ${selected ? "bg-ink/15" : "bg-transparent"}`}
+      <IconGlyphButton
+        onSelect={onSelect}
+        onOpen={onOpen}
+        ariaLabel={`Open folder ${name}`}
+        selected={selected}
+        dragProps={{ ...listeners, ...attributes }}
       >
         <FolderGlyph hasContents={hasContents} isOver={isOver} />
-      </button>
+      </IconGlyphButton>
       {renaming ? (
         <input
           autoFocus
@@ -174,6 +164,6 @@ export function FolderIcon({
           </button>
         </div>
       )}
-    </div>
+    </DesktopIconSlot>
   );
 }
