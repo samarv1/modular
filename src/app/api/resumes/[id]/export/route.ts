@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { ownerScopedTable } from "@/lib/db";
+import { asRow, ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
 import { getAdapterOrThrow } from "@/lib/get-adapter-or-throw";
 import { loadCompileComposition } from "@/lib/compile-composition-query";
@@ -8,7 +8,6 @@ import { buildExportArchive } from "@/lib/latex-export";
 import { downloadArchive, getSignedUrl, uploadArchive } from "@/lib/storage";
 import { resumeDownloadFilename } from "@/lib/resume-filename";
 import { isUuid } from "@/lib/api-request";
-import { asRow } from "@/lib/supabase-result";
 
 // LaTeX ZIP export (PLAN.md Phase 8). PDF download already exists as a side
 // effect of compile (see compile/route.ts) — this only produces the source

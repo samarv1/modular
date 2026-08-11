@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerScopedTable } from "@/lib/db";
-import { asRows } from "@/lib/supabase-result";
+import { asRows, ownerScopedTable } from "@/lib/db";
 import type { BankEntryRow } from "@/lib/rows";
 
 // ?sourceResumeId= scopes to one upload's entries — used by the import

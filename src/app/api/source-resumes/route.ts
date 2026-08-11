@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerScopedTable } from "@/lib/db";
-import { asRows } from "@/lib/supabase-result";
+import { asRows, ownerScopedTable } from "@/lib/db";
 import type { SourceResumeRow } from "@/lib/rows";
 
 // Backs the home page's "Bank" static page (Desktop) — a plain list of what

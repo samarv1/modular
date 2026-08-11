@@ -1,13 +1,12 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { ownerScopedTable } from "@/lib/db";
+import { asRow, asRows, ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
 import { detectAdapter } from "@/lib/adapters/registry";
 import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
 import { deleteArchive, uploadArchive } from "@/lib/storage";
 import { dedupedName } from "@/lib/deduped-name";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
-import { asRow, asRows } from "@/lib/supabase-result";
 import type { ExtractedResume } from "@/lib/adapters/types";
 
 // Exact-duplicate matching should ignore incidental whitespace differences

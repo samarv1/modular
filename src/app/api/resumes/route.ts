@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { ownerScopedTable } from "@/lib/db";
+import { asRow, asRows, ownerScopedTable } from "@/lib/db";
 import { CompositionError, compositionErrorStatus, setResumeComposition } from "@/lib/composition";
 import { dedupedName } from "@/lib/deduped-name";
 import { readJsonObject } from "@/lib/api-request";
 import { integerFieldError, nullableStringFieldError } from "@/lib/field-validation";
-import { asRow, asRows } from "@/lib/supabase-result";
 import type { ResumeRow } from "@/lib/rows";
 
 async function ownerHasFolder(folderId: string | null | undefined): Promise<boolean> {
