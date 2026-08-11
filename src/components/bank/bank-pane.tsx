@@ -17,7 +17,7 @@ import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
 import { sectionGroupLabel } from "@/lib/section-label";
 import type { BankEntryRow } from "@/lib/rows";
 import { BANK_DRAG_PREFIX } from "@/components/dnd-ids";
-import { UploadZone, type UploadStatus, type UploadZoneHandle } from "@/components/home/upload-zone";
+import { ImportReviewModal } from "@/components/home/import-review-modal";
 
 // The uploaded file's original name (source_resume.display_name), so
 // entries from different uploads read as "Ldgr" / "Dibs" instead of an id
@@ -54,8 +54,8 @@ export function BankPane({
   onEntriesImported?: (entries: BankEntryRow[]) => void;
 }) {
   const [previewEntryId, setPreviewEntryId] = useState<string | null>(null);
-  const uploadRef = useRef<UploadZoneHandle>(null);
-  const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [entryError, setEntryError] = useState<string | null>(null);
   const patchVersions = useRef(new Map<string, number>());
   // Derived from `entries` (not a captured snapshot) so tag edits made
   // inside the modal itself show up immediately rather than going stale.
@@ -110,35 +110,30 @@ export function BankPane({
         displayName: previous.display_name,
         tags: previous.tags,
       });
-      setUploadStatus({ kind: "error", message: "Entry changes could not be saved." });
+      setEntryError("Entry changes could not be saved.");
     }
   }
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       <div className="flex items-center justify-between gap-2">
-        {uploadStatus ? (
-          <span
-            className={`truncate text-[11.5px] ${uploadStatus.kind === "success" ? "text-ok" : "text-danger"}`}
-          >
-            {uploadStatus.message}
-          </span>
+        {entryError ? (
+          <span className="truncate text-[11.5px] text-danger">{entryError}</span>
         ) : (
           <span />
         )}
         <button
-          onClick={() => uploadRef.current?.open()}
+          onClick={() => setImportModalOpen(true)}
           className="flex shrink-0 items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[10.5px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
         >
           <UploadIcon className="size-3" />
           Upload
         </button>
-        <UploadZone
-          ref={uploadRef}
-          hideDropzone
-          onStatus={setUploadStatus}
-          onImported={(result) => {
-            onEntriesImported?.(result.entries);
+        <ImportReviewModal
+          open={importModalOpen}
+          onOpenChange={setImportModalOpen}
+          onImported={(imported) => {
+            onEntriesImported?.(imported);
           }}
         />
       </div>

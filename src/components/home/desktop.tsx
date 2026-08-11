@@ -11,7 +11,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { FolderPlus, Plus, Trash2 } from "lucide-react";
+import { FolderPlus, Plus, Trash2, Upload } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { backToDesktopButtonClass } from "@/components/back-to-desktop";
 import {
@@ -28,7 +28,7 @@ import { DocumentGlyph } from "@/components/home/resume-icon";
 import { FolderIcon } from "@/components/home/folder-icon";
 import { ResumeIcon } from "@/components/home/resume-icon";
 import { StaticPageIcon } from "@/components/home/static-page-icon";
-import { UploadZone, type UploadStatus } from "@/components/home/upload-zone";
+import { ImportReviewModal } from "@/components/home/import-review-modal";
 import {
   DESKTOP_BACK_DROP_ID,
   FOLDER_DRAG_PREFIX,
@@ -42,6 +42,55 @@ import { STATIC_PAGES } from "@/lib/static-pages";
 
 function pagePositionKey(id: string) {
   return `desktop-page-position:${id}`;
+}
+
+// Same select-on-click, open-on-double-click pattern as ResumeIcon, minus
+// drag (bank uploads aren't repositionable/foldered, just a plain list).
+function BankFileIcon({
+  title,
+  selected,
+  onSelect,
+  onOpen,
+}: {
+  title: string;
+  selected: boolean;
+  onSelect: () => void;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="flex w-32 select-none flex-col items-center gap-1">
+      <button
+        onClick={onSelect}
+        onDoubleClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            onOpen();
+          }
+        }}
+        aria-label={`Edit uploaded resume ${title}`}
+        className={`cursor-pointer rounded-lg border-0 p-1 ${selected ? "bg-ink/15" : "bg-transparent"}`}
+      >
+        <DocumentGlyph />
+      </button>
+      <button
+        onClick={onSelect}
+        onDoubleClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            onOpen();
+          }
+        }}
+        title={title}
+        className={`inline-block max-w-full whitespace-normal break-words rounded px-1 text-center text-[11px] font-medium leading-tight ${
+          selected ? "bg-brand text-white" : "text-ink"
+        }`}
+      >
+        {title}
+      </button>
+    </div>
+  );
 }
 
 function BackDrop({ onClick }: { onClick: () => void }) {
@@ -78,12 +127,18 @@ export function Desktop({
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   // Finder-style selection: one item at a time, first click highlights and
   // the second (double) click opens.
-  const [selected, setSelected] = useState<{ kind: "folder" | "resume" | "page"; id: string } | null>(
-    null,
-  );
+  const [selected, setSelected] = useState<
+    { kind: "folder" | "resume" | "page" | "bank"; id: string } | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  // Set when a Bank folder item is opened, so the same modal instance shows
+  // that upload's real entries (edit mode) instead of the file-pick flow.
+  const [editingSourceResume, setEditingSourceResume] = useState<{
+    id: string;
+    displayName: string;
+  } | null>(null);
   const resumePatchVersions = useRef(new Map<string, number>());
   const folderPatchVersions = useRef(new Map<string, number>());
 
@@ -339,36 +394,51 @@ export function Desktop({
   // matches the app's own styling — deleteTarget holds what's pending
   // confirmation, separate from `selected` so the dialog survives even if
   // the click that opened it also happened to deselect the icon.
-  const [deleteTarget, setDeleteTarget] = useState<{ kind: "folder" | "resume"; id: string } | null>(
-    null,
-  );
+  const [deleteTarget, setDeleteTarget] = useState<
+    { kind: "folder" | "resume" | "bank"; id: string } | null
+  >(null);
 
   function confirmDeleteSelected() {
     if (!selected || selected.kind === "page") return;
     setDeleteTarget({ kind: selected.kind, id: selected.id });
   }
 
+  const DELETE_ENDPOINT: Record<"folder" | "resume" | "bank", string> = {
+    folder: "folders",
+    resume: "resumes",
+    bank: "source-resumes",
+  };
+
   // Backend orphans the folder's resumes (folder_id -> null) rather than
   // deleting them (0003_folders.sql, ON DELETE SET NULL) — mirror that here
   // so they reappear on the desktop instead of vanishing from local state.
+  // A bank upload orphans its bank_entry rows the same way (source_resume_id
+  // -> null), so deleting one here only removes the upload's own icon, not
+  // any entries already pulled from it.
   async function performDelete() {
     if (!deleteTarget) return;
     const { kind, id } = deleteTarget;
     setDeleteTarget(null);
     setSelected((cur) => (cur?.kind === kind && cur.id === id ? null : cur));
     try {
-      const res = await fetch(`/api/${kind === "folder" ? "folders" : "resumes"}/${id}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(`/api/${DELETE_ENDPOINT[kind]}/${id}`, { method: "DELETE" });
       if (!res.ok && res.status !== 404) throw new Error("delete failed");
       if (kind === "folder") {
         setFolders((cur) => cur.filter((f) => f.id !== id));
         setResumes((cur) => cur.map((r) => (r.folder_id === id ? { ...r, folder_id: null } : r)));
-      } else {
+      } else if (kind === "resume") {
         setResumes((cur) => cur.filter((r) => r.id !== id));
+      } else {
+        setBankFiles((cur) => (cur ? cur.filter((f) => f.id !== id) : cur));
       }
     } catch {
-      showError(kind === "folder" ? "Folder could not be deleted." : "Resume could not be deleted.");
+      showError(
+        kind === "folder"
+          ? "Folder could not be deleted."
+          : kind === "resume"
+            ? "Resume could not be deleted."
+            : "Upload could not be deleted.",
+      );
     }
   }
 
@@ -377,14 +447,17 @@ export function Desktop({
       ? folders.find((f) => f.id === deleteTarget.id)?.name
       : deleteTarget?.kind === "resume"
         ? resumes.find((r) => r.id === deleteTarget.id)?.title
-        : undefined;
+        : deleteTarget?.kind === "bank"
+          ? bankFiles?.find((f) => f.id === deleteTarget.id)?.display_name
+          : undefined;
 
   // Available both at the top level and inside a folder — creating from
   // inside a folder drops the new resume straight into it, not onto the
   // desktop underneath.
   async function createResume() {
     if (!templateShellAvailable) {
-      showError("Import one of your resume ZIPs first");
+      setEditingSourceResume(null);
+      setImportModalOpen(true);
       return;
     }
     const containerCount =
@@ -417,9 +490,21 @@ export function Desktop({
       <AppHeader />
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-3 py-2">
         {openPage ? (
-          <button onClick={() => setOpenPageId(null)} className={backToDesktopButtonClass}>
-            ← Desktop
-          </button>
+          <>
+            <button onClick={() => setOpenPageId(null)} className={backToDesktopButtonClass}>
+              ← Desktop
+            </button>
+            {openPage.kind === "bank" && (
+              <button
+                onClick={confirmDeleteSelected}
+                disabled={!selected || selected.kind !== "bank"}
+                className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-danger hover:text-danger disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-muted-fg"
+              >
+                <Trash2 className="size-3" />
+                Delete
+              </button>
+            )}
+          </>
         ) : (
           <>
             {currentFolder && (
@@ -463,31 +548,40 @@ export function Desktop({
               </button>
             </div>
             <div className="h-6 w-px bg-line" />
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] uppercase tracking-wide text-faint">Import</span>
-              <div className="w-[260px]">
-                <UploadZone
-                  onImported={() => {
-                    setTemplateShellAvailable(true);
-                    refreshBankFiles();
-                  }}
-                  onStatus={setUploadStatus}
-                />
-              </div>
-              {uploadStatus && (
-                <span
-                  className={`px-2 text-[11.5px] ${uploadStatus.kind === "success" ? "text-ok" : "text-danger"}`}
-                >
-                  {uploadStatus.message}
-                </span>
-              )}
-            </div>
+            <button
+              onClick={() => {
+                setEditingSourceResume(null);
+                setImportModalOpen(true);
+              }}
+              className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
+            >
+              <Upload className="size-3" />
+              Import
+            </button>
           </>
         )}
         {error && <span className="px-2 text-[11.5px] text-danger">{error}</span>}
       </div>
 
-      <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragEnd={handleDragEnd}>
+      <ImportReviewModal
+        open={importModalOpen}
+        onOpenChange={(next) => {
+          setImportModalOpen(next);
+          if (!next) setEditingSourceResume(null);
+        }}
+        editSourceResume={editingSourceResume}
+        onImported={() => {
+          setTemplateShellAvailable(true);
+          refreshBankFiles();
+        }}
+      />
+
+      <DndContext
+        id="desktop-dnd"
+        sensors={sensors}
+        collisionDetection={pointerWithin}
+        onDragEnd={handleDragEnd}
+      >
         {/* Bounded workspace panel, not an edge-to-edge desktop — a handful
             of icons on a full-viewport canvas read as mostly empty space, so
             this centers a fixed-size "desk" instead of filling the pane. No
@@ -521,15 +615,20 @@ export function Desktop({
                 ) : (
                   <div className="flex flex-wrap gap-4">
                     {bankFiles.map((file) => (
-                      <div
+                      <BankFileIcon
                         key={file.id}
-                        className="flex w-32 select-none flex-col items-center gap-1"
-                      >
-                        <DocumentGlyph />
-                        <span className="inline-block max-w-full whitespace-normal break-words px-1 text-center text-[11px] font-medium leading-tight text-ink">
-                          {file.display_name ?? file.id.slice(0, 6)}
-                        </span>
-                      </div>
+                        title={file.display_name ?? file.id.slice(0, 6)}
+                        selected={selected?.kind === "bank" && selected.id === file.id}
+                        onSelect={() => setSelected({ kind: "bank", id: file.id })}
+                        onOpen={() => {
+                          setSelected(null);
+                          setEditingSourceResume({
+                            id: file.id,
+                            displayName: file.display_name ?? file.id.slice(0, 6),
+                          });
+                          setImportModalOpen(true);
+                        }}
+                      />
                     ))}
                   </div>
                 )}
@@ -620,13 +719,15 @@ export function Desktop({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {deleteTarget?.kind === "folder" ? "folder" : "resume"} &ldquo;
-              {deleteTargetLabel ?? "this item"}&rdquo;?
+              Delete {deleteTarget?.kind === "folder" ? "folder" : deleteTarget?.kind === "bank" ? "upload" : "resume"}
+              &ldquo;{deleteTargetLabel ?? "this item"}&rdquo;?
             </AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget?.kind === "folder"
                 ? "Its contents will move back to the desktop."
-                : "This can't be undone."}
+                : deleteTarget?.kind === "bank"
+                  ? "Entries already pulled from it stay in your bank, no longer linked to this upload."
+                  : "This can't be undone."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

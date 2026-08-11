@@ -7,6 +7,7 @@ import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
 import { deleteArchive, uploadArchive } from "@/lib/storage";
 import { dedupeName } from "@/lib/dedupe-name";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
+import type { ExtractedResume } from "@/lib/adapters/types";
 
 // Without generated Database types, supabase-js's select() return type
 // collapses to an unusable GenericStringError rather than a clean `any`.
@@ -23,6 +24,79 @@ function asRows<T extends Row>(result: { data: unknown; error: unknown }) {
 // (trailing spaces, blank lines) without doing any semantic comparison.
 function normalizeLatex(raw: string): string {
   return raw.trim().replace(/\s+/g, " ");
+}
+
+// Flat, index-stable view of every extracted entry, in the same order
+// section-by-section that the DB insert eventually uses. `mode=preview` and
+// `mode=commit` both derive this from an identical parse/extract of the same
+// file, so an override's `index` addresses the same entry in either call.
+type FlatEntry = {
+  index: number;
+  kind: string;
+  sourceSection: string;
+  displayName: string;
+  rawLatex: string;
+  sourceOffsetStart: number | null;
+  sourceOffsetEnd: number | null;
+  requiredPackages: string[];
+};
+
+function flattenEntries(extracted: ExtractedResume): FlatEntry[] {
+  let index = 0;
+  return extracted.sections.flatMap((section) =>
+    section.entries.map((entry) => ({
+      index: index++,
+      kind: entry.kind,
+      sourceSection: section.title,
+      displayName: entry.displayName,
+      rawLatex: entry.rawLatex,
+      sourceOffsetStart: entry.sourceOffsetStart ?? null,
+      sourceOffsetEnd: entry.sourceOffsetEnd ?? null,
+      requiredPackages: entry.requiredPackages,
+    })),
+  );
+}
+
+type EntryOverride = {
+  index: number;
+  displayName?: string;
+  excluded?: boolean;
+  // The review modal auto-excludes entries flagged isDuplicate in preview
+  // (see mode=preview's existingNormalized check below); this says the user
+  // explicitly opted back in, so the exact-duplicate filter further down
+  // must not silently drop it again.
+  includeDuplicate?: boolean;
+};
+
+function parseOverrides(raw: FormDataEntryValue | null): EntryOverride[] {
+  if (typeof raw !== "string") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(
+    (o): o is EntryOverride => typeof o === "object" && o !== null && typeof (o as EntryOverride).index === "number",
+  );
+}
+
+function applyOverrides(entries: FlatEntry[], overrides: EntryOverride[]): FlatEntry[] {
+  const byIndex = new Map(overrides.map((o) => [o.index, o]));
+  const result: FlatEntry[] = [];
+  for (const entry of entries) {
+    const override = byIndex.get(entry.index);
+    if (override?.excluded) continue;
+    result.push({
+      ...entry,
+      displayName:
+        typeof override?.displayName === "string" && override.displayName.trim()
+          ? override.displayName.trim()
+          : entry.displayName,
+    });
+  }
+  return result;
 }
 
 async function cleanupFailedImport({
@@ -68,6 +142,7 @@ export async function POST(request: Request) {
       { status: 413 },
     );
   }
+  const mode = form.get("mode") === "preview" ? "preview" : "commit";
 
   const zipBytes = new Uint8Array(await file.arrayBuffer());
 
@@ -99,25 +174,63 @@ export async function POST(request: Request) {
   }
 
   const extracted = adapter.extract({ rootFile: archive.rootFile, source: archive.source });
-  const entryRows = extracted.sections.flatMap((section) =>
-    section.entries.map((entry) => ({
-      source_resume_id: "",
-      kind: entry.kind,
-      source_section: section.title,
-      raw_latex: entry.rawLatex,
-      source_offset_start: entry.sourceOffsetStart,
-      source_offset_end: entry.sourceOffsetEnd,
-      required_packages: entry.requiredPackages,
-      display_name: entry.displayName,
-      tags: [],
-    })),
-  );
-  if (entryRows.length === 0) {
+  const flatEntries = flattenEntries(extracted);
+  if (flatEntries.length === 0) {
     return NextResponse.json(
       { error: "no reusable resume entries were found" },
       { status: 422 },
     );
   }
+
+  if (mode === "preview") {
+    // Pure parse/extract — no storage upload, no DB writes, so there's
+    // nothing to clean up if the user cancels the review modal. Duplicate
+    // flags are informational only (dedup itself still runs at commit time).
+    const { data: existingLatex, error: existingLatexError } = await ownerScopedTable(
+      "bank_entry",
+    ).select("raw_latex");
+    if (existingLatexError) throw new Error(existingLatexError.message);
+    const existingNormalized = new Set(
+      ((existingLatex ?? []) as unknown as { raw_latex: string }[]).map((row) =>
+        normalizeLatex(row.raw_latex),
+      ),
+    );
+
+    return NextResponse.json({
+      compatible: true,
+      sections: extracted.sections.map((section) => ({
+        title: section.title,
+        entryCount: section.entries.length,
+      })),
+      entries: flatEntries.map((entry) => ({
+        ...entry,
+        isDuplicate: existingNormalized.has(normalizeLatex(entry.rawLatex)),
+      })),
+    });
+  }
+
+  const overrides = parseOverrides(form.get("overrides"));
+  const finalEntries = applyOverrides(flatEntries, overrides);
+  if (finalEntries.length === 0) {
+    return NextResponse.json(
+      { error: "no reusable resume entries were found" },
+      { status: 422 },
+    );
+  }
+  const forceIncludeIndices = new Set(
+    overrides.filter((o) => o.includeDuplicate).map((o) => o.index),
+  );
+  const entryRows = finalEntries.map((entry) => ({
+    source_resume_id: "",
+    kind: entry.kind,
+    source_section: entry.sourceSection,
+    raw_latex: entry.rawLatex,
+    source_offset_start: entry.sourceOffsetStart,
+    source_offset_end: entry.sourceOffsetEnd,
+    required_packages: entry.requiredPackages,
+    display_name: entry.displayName,
+    tags: [] as string[],
+  }));
 
   const ownerId = getOwnerId();
   const archivePath = `${ownerId}/${randomUUID()}.zip`;
@@ -198,8 +311,12 @@ export async function POST(request: Request) {
         normalizeLatex(row.raw_latex),
       ),
     );
-    const dedupedEntryRows = entryRows.filter((entryRow) => {
+    const dedupedEntryRows = entryRows.filter((entryRow, i) => {
       const normalized = normalizeLatex(entryRow.raw_latex as string);
+      if (forceIncludeIndices.has(finalEntries[i].index)) {
+        seen.add(normalized);
+        return true;
+      }
       if (seen.has(normalized)) return false;
       seen.add(normalized);
       return true;

@@ -197,7 +197,11 @@ function cleanLatexText(input: string): string {
 
 function extractItems(latex: string): string[] {
   const items: string[] = [];
-  const re = /\\resumeSubItem|\\resumeItem/g;
+  // The negative lookahead matters: LaTeX macro names are maximal runs of
+  // letters, so a bare \\resumeItem would also match as a prefix of
+  // \resumeItemListStart / \resumeItemListEnd, then scan forward and grab
+  // the next real bullet's braces, duplicating it.
+  const re = /\\resumeSubItem(?![a-zA-Z])|\\resumeItem(?![a-zA-Z])/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(latex))) {
     const [arg] = readBalancedArgs(latex.slice(m.index + m[0].length), 1);
@@ -255,8 +259,30 @@ function parseSectionChunkPreview(rawLatex: string): EntryPreview {
   return { title: text.slice(0, 200) || "Section content", bullets: [] };
 }
 
+// The name/contact block (see extract.ts's headerSection) is centered plain
+// text — a name line, then a `\\`-separated contact line — not an itemized
+// list, so it must not go through parseSectionChunkPreview's "multiple
+// `\\`-separated lines ⇒ bullets" heuristic (that's for the Technical
+// Skills idiom). First line is the name/title; the rest join into one
+// contact line.
+function parseHeaderChunkPreview(rawLatex: string): EntryPreview {
+  const body = rawLatex
+    .replace(/\\begin\{[^}]*\}(\[[^\]]*\])?/g, " ")
+    .replace(/\\end\{[^}]*\}/g, " ");
+
+  const lines = body
+    .split("\\\\")
+    .map((line) => cleanLatexText(line))
+    .filter(Boolean);
+
+  const [title, ...rest] = lines;
+  return { title: title ?? "", meta: rest.join(" ") || undefined, bullets: [] };
+}
+
 export function parseJakeEntryPreview(kind: string, rawLatex: string): EntryPreview {
   const bullets = extractItems(rawLatex);
+
+  if (kind === "header_chunk") return parseHeaderChunkPreview(rawLatex);
 
   if (kind === "project_entry") {
     const idx = rawLatex.indexOf("\\resumeProjectHeading");

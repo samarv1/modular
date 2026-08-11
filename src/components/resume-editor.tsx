@@ -552,6 +552,7 @@ export function ResumeEditor({
       </div>
 
       <DndContext
+        id="resume-editor-dnd"
         sensors={sensors}
         collisionDetection={pointerWithin}
         onDragStart={handleDragStart}

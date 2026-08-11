@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import JSZip from "jszip";
@@ -12,15 +12,17 @@ vi.mock("@/lib/storage", () => ({
 
 // Import after the mock above is registered so the route picks it up.
 const { POST } = await import("./route");
+const { uploadArchive } = await import("@/lib/storage");
 
 const fixture = readFileSync(
   join(__dirname, "../../../../fixtures/jakes-resume/resume.tex"),
   "utf8",
 );
 
-function requestWithFile(file: File) {
+function requestWithFile(file: File, fields?: Record<string, string>) {
   const form = new FormData();
   form.set("file", file);
+  for (const [key, value] of Object.entries(fields ?? {})) form.set(key, value);
   return new Request("http://localhost/api/imports", { method: "POST", body: form });
 }
 
@@ -128,5 +130,134 @@ describe("POST /api/imports — duplicate entry detection", () => {
     expect(body.entries).toHaveLength(1);
     expect(body.entries[0].raw_latex).toContain("Gitlytics2");
     sourceResumeIds.push(body.sourceResumeId);
+  });
+});
+
+describe("POST /api/imports — preview mode", () => {
+  beforeEach(() => {
+    vi.mocked(uploadArchive).mockClear();
+  });
+
+  it("parses and returns entries without touching storage or the DB", async () => {
+    const res = await POST(
+      requestWithFile(await zipFileOf(fixture, "preview.zip"), { mode: "preview" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.compatible).toBe(true);
+    expect(body.sourceResumeId).toBeUndefined();
+    expect(body.entries.length).toBeGreaterThan(0);
+    expect(body.entries[0]).toMatchObject({ index: 0 });
+    expect(uploadArchive).not.toHaveBeenCalled();
+
+    // Nothing was persisted — a fresh preview of the same file reports the
+    // same entries as new (not flagged as duplicates of themselves).
+    expect(body.entries.every((e: { isDuplicate: boolean }) => e.isDuplicate === false)).toBe(true);
+  });
+
+  it("still reports a structural mismatch as 422 with no DB writes", async () => {
+    const zip = new JSZip();
+    zip.file("resume.tex", "\\documentclass{article}\\begin{document}not jake\\end{document}");
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const file = new File([bytes], "mismatch.zip");
+    const res = await POST(requestWithFile(file, { mode: "preview" }));
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.compatible).toBe(false);
+    expect(body.mismatchReport).toBeDefined();
+    expect(uploadArchive).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/imports — commit mode with overrides", () => {
+  const sourceResumeIds: string[] = [];
+  let templateShellId: string | undefined;
+
+  afterAll(async () => {
+    for (const id of sourceResumeIds) {
+      await ownerScopedTable("bank_entry").delete().eq("source_resume_id", id);
+      await ownerScopedTable("source_resume").delete().eq("id", id);
+    }
+    if (templateShellId) {
+      await ownerScopedTable("template_shell").delete().eq("id", templateShellId);
+    }
+  });
+
+  async function preview(tex: string, name: string) {
+    const res = await POST(requestWithFile(await zipFileOf(tex, name), { mode: "preview" }));
+    expect(res.status).toBe(200);
+    return res.json();
+  }
+
+  it("excludes and renames entries by index, leaving the rest untouched", async () => {
+    const previewBody = await preview(fixture, "overrides-a.zip");
+    const entries: { index: number; kind: string }[] = previewBody.entries;
+    const headerIndex = entries.find((e) => e.kind === "header_chunk")!.index;
+    const renameTarget = entries.find((e) => e.index !== headerIndex)!.index;
+
+    const overrides = [
+      { index: headerIndex, excluded: true },
+      { index: renameTarget, displayName: "Renamed via override" },
+    ];
+    const res = await POST(
+      requestWithFile(await zipFileOf(fixture, "overrides-a.zip"), {
+        mode: "commit",
+        overrides: JSON.stringify(overrides),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.compatible).toBe(true);
+    sourceResumeIds.push(body.sourceResumeId);
+    templateShellId = body.templateShellId;
+
+    expect(body.entries.some((e: { kind: string }) => e.kind === "header_chunk")).toBe(false);
+    expect(
+      body.entries.some((e: { display_name: string }) => e.display_name === "Renamed via override"),
+    ).toBe(true);
+  });
+
+  it("422s when overrides exclude every entry", async () => {
+    const previewBody = await preview(fixture, "overrides-b.zip");
+    const overrides = (previewBody.entries as { index: number }[]).map((e) => ({
+      index: e.index,
+      excluded: true,
+    }));
+    const res = await POST(
+      requestWithFile(await zipFileOf(fixture, "overrides-b.zip"), {
+        mode: "commit",
+        overrides: JSON.stringify(overrides),
+      }),
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("includeDuplicate bypasses the exact-duplicate filter for that entry only", async () => {
+    // The first test in this describe already committed `fixture` once, but
+    // excluded its header_chunk — so everything except the header previews
+    // as a duplicate here.
+    const previewBody = await preview(fixture, "overrides-c.zip");
+    const entries: { index: number; isDuplicate: boolean }[] = previewBody.entries;
+    const keepIndex = entries.find((e) => e.isDuplicate)!.index;
+
+    const overrides: { index: number; excluded: boolean; includeDuplicate?: boolean }[] = entries
+      .filter((e) => e.index !== keepIndex)
+      .map((e) => ({ index: e.index, excluded: true }));
+    overrides.push({ index: keepIndex, excluded: false, includeDuplicate: true });
+
+    const res = await POST(
+      requestWithFile(await zipFileOf(fixture, "overrides-c.zip"), {
+        mode: "commit",
+        overrides: JSON.stringify(overrides),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.compatible).toBe(true);
+    sourceResumeIds.push(body.sourceResumeId);
+
+    // Only the force-included duplicate landed — everything else was
+    // excluded (and would've been deduped away regardless).
+    expect(body.entryCount).toBe(1);
   });
 });

@@ -1,6 +1,40 @@
 import { describe, expect, it } from "vitest";
 import { parseJakeEntryPreview } from "./jake-entry-preview";
 
+describe("parseJakeEntryPreview header_chunk", () => {
+  it("renders the name as the title and the contact line as meta, not as bullets", () => {
+    const preview = parseJakeEntryPreview(
+      "header_chunk",
+      `\\begin{center}
+    \\textbf{\\Huge \\scshape Jake Ryan} \\\\ \\vspace{1pt}
+    \\small 123-456-7890 $|$ \\href{mailto:x@x.com}{\\underline{jake@su.edu}} $|$
+    \\href{https://linkedin.com/in/...}{\\underline{linkedin.com/in/jake}}
+\\end{center}`,
+    );
+    expect(preview.title).toBe("Jake Ryan");
+    expect(preview.meta).toContain("123-456-7890");
+    expect(preview.meta).toContain("jake@su.edu");
+    expect(preview.bullets).toEqual([]);
+  });
+});
+
+describe("parseJakeEntryPreview resumeItemListStart/End", () => {
+  it("doesn't duplicate the first bullet by matching \\resumeItem inside \\resumeItemListStart/End", () => {
+    const preview = parseJakeEntryPreview(
+      "subheading_entry",
+      `\\resumeSubheading
+        {University of California, Davis}{Davis, CA}
+        {Bachelor of Science in Computer Science}{Jun. 2026}
+        \\resumeItemListStart
+          \\resumeItem{GPA: 3.84 Coursework: Artificial Intelligence, Human-Computer Interaction, Data Structures \\& Algorithms}
+        \\resumeItemListEnd`,
+    );
+    expect(preview.bullets).toEqual([
+      "GPA: 3.84 Coursework: Artificial Intelligence, Human-Computer Interaction, Data Structures & Algorithms",
+    ]);
+  });
+});
+
 describe("parseJakeEntryPreview bullet cleaning", () => {
   const bulletPreview = (bulletLatex: string) =>
     parseJakeEntryPreview(

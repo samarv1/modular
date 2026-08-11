@@ -45,3 +45,36 @@ export async function PATCH(
   }
   return NextResponse.json({ entry: data });
 }
+
+// resume_section_entry.bank_entry_id is ON DELETE RESTRICT (0001_init.sql:
+// "entries in use can't be hard-deleted") — removing an entry still placed
+// in a resume fails with a 23503 here, so the caller has to remove it from
+// the resume first.
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const { data, error } = await ownerScopedTable("bank_entry")
+    .delete()
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    const status = mutationErrorStatus(error);
+    return NextResponse.json(
+      {
+        error:
+          status === 422
+            ? "This entry is used in a resume and can't be removed until it's taken out there first."
+            : error.message,
+      },
+      { status },
+    );
+  }
+  if (!data) {
+    return NextResponse.json({ error: "entry not found" }, { status: 404 });
+  }
+  return new NextResponse(null, { status: 204 });
+}
