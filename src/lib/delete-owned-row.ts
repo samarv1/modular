@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import { mutationErrorStatus } from "@/lib/api-request";
 
 /**
@@ -16,7 +17,8 @@ export async function deleteOwnedRow(
   notFoundMessage: string,
   describeError?: (status: number, message: string) => string,
 ): Promise<NextResponse> {
-  const { data, error } = await ownerScopedTable(table).delete().eq("id", id).select("id").maybeSingle();
+  const ownerId = await getOwnerId();
+  const { data, error } = await ownerScopedTable(table, ownerId).delete().eq("id", id).select("id").maybeSingle();
   if (error) {
     const status = mutationErrorStatus(error);
     return NextResponse.json(

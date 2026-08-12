@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import { Desktop } from "@/components/home/desktop";
 import type { ResumeFolderRow, ResumeRow } from "@/lib/rows";
 
@@ -9,20 +10,21 @@ export default async function Home() {
   // builds prerender the owner's desktop and freeze it at deploy time.
   await connection();
 
+  const ownerId = await getOwnerId();
   const [
     { data: folderData, error: folderError },
     { data: resumeData, error: resumeError },
     { data: shellData, error: shellError },
   ] = await Promise.all([
-    ownerScopedTable("resume_folder")
+    ownerScopedTable("resume_folder", ownerId)
       .select("id, name, position_x, position_y, created_at")
       .order("created_at", { ascending: true }),
-    ownerScopedTable("resume")
+    ownerScopedTable("resume", ownerId)
       .select(
         "id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at",
       )
       .order("created_at", { ascending: true }),
-    ownerScopedTable("template_shell").select("id").limit(1).maybeSingle(),
+    ownerScopedTable("template_shell", ownerId).select("id").limit(1).maybeSingle(),
   ]);
   if (folderError) throw new Error((folderError as { message: string }).message);
   if (resumeError) throw new Error((resumeError as { message: string }).message);

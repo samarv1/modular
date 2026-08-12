@@ -2,6 +2,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ownerScopedTable } from "@/lib/db";
 import { setResumeComposition } from "@/lib/composition";
 
+// Route handlers now resolve ownerId from a real Supabase Auth session
+// (src/lib/owner.ts), which isn't available in this test environment —
+// stand in with the same fixed test owner id the live-DB fixtures below use.
+const testOwnerId = process.env.MODULAR_OWNER_ID!;
+vi.mock("@/lib/owner", () => ({ getOwnerId: async () => testOwnerId }));
+
 const compileLatexInSandbox = vi.fn();
 const uploadArchive = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/sandbox-compile", () => ({ compileLatexInSandbox: (...args: unknown[]) => compileLatexInSandbox(...args) }));
@@ -27,7 +33,7 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
   let bankEntryId: string;
 
   beforeAll(async () => {
-    const { data: shell, error: shellError } = await ownerScopedTable("template_shell")
+    const { data: shell, error: shellError } = await ownerScopedTable("template_shell", testOwnerId)
       .insert({
         archive_path: "test/compile-race-shell.zip",
         root_file: "resume.tex",
@@ -40,7 +46,7 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
     if (shellError) throw new Error(shellError.message);
     shellId = (shell as { id: string }).id;
 
-    const { data: bankEntry, error: bankEntryError } = await ownerScopedTable("bank_entry")
+    const { data: bankEntry, error: bankEntryError } = await ownerScopedTable("bank_entry", testOwnerId)
       .insert({
         kind: "section_chunk",
         source_section: "Summary",
@@ -56,7 +62,7 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
     if (bankEntryError) throw new Error(bankEntryError.message);
     bankEntryId = (bankEntry as { id: string }).id;
 
-    const { data: resume, error: resumeError } = await ownerScopedTable("resume")
+    const { data: resume, error: resumeError } = await ownerScopedTable("resume", testOwnerId)
       .insert({ title: `Compile race test ${crypto.randomUUID()}`, template_shell_id: shellId })
       .select("id")
       .single();
@@ -67,9 +73,9 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
   });
 
   afterAll(async () => {
-    if (resumeId) await ownerScopedTable("resume").delete().eq("id", resumeId);
-    if (bankEntryId) await ownerScopedTable("bank_entry").delete().eq("id", bankEntryId);
-    if (shellId) await ownerScopedTable("template_shell").delete().eq("id", shellId);
+    if (resumeId) await ownerScopedTable("resume", testOwnerId).delete().eq("id", resumeId);
+    if (bankEntryId) await ownerScopedTable("bank_entry", testOwnerId).delete().eq("id", bankEntryId);
+    if (shellId) await ownerScopedTable("template_shell", testOwnerId).delete().eq("id", shellId);
   });
 
   it("keeps only the newest compile's result when an older one finishes last", async () => {
@@ -95,7 +101,7 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
     resolveOlder(fakePdf("older"));
     await olderCall;
 
-    const { data: finalRow, error } = await ownerScopedTable("resume")
+    const { data: finalRow, error } = await ownerScopedTable("resume", testOwnerId)
       .select("compile_status, pdf_artifact_path, last_compile_request_id")
       .eq("id", resumeId)
       .single();

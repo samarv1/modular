@@ -27,7 +27,7 @@ export async function setResumeComposition(
   sections: CompositionSectionInput[],
 ): Promise<void> {
   const client = createServiceClient();
-  const ownerId = getOwnerId();
+  const ownerId = await getOwnerId();
 
   const { error } = await client.rpc("set_resume_composition", {
     p_resume_id: resumeId,

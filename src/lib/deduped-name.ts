@@ -1,4 +1,5 @@
 import { ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import { dedupeName } from "@/lib/dedupe-name";
 
 /**
@@ -15,7 +16,8 @@ export async function dedupedName(
   desired: string,
   options: { excludeId?: string; excludeNulls?: boolean } = {},
 ): Promise<string> {
-  let query = ownerScopedTable(table).select(column);
+  const ownerId = await getOwnerId();
+  let query = ownerScopedTable(table, ownerId).select(column);
   if (options.excludeId) query = query.neq("id", options.excludeId);
   if (options.excludeNulls) query = query.not(column, "is", null);
   const { data, error } = await query;

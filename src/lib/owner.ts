@@ -1,11 +1,17 @@
-// Single source for the current owner_id. Personal MVP has no login, so this
-// resolves to a hardcoded constant from the environment. When Google SSO
-// ships, replace the body of this function with a real session lookup —
-// every call site and RLS-setting call stays the same.
-export function getOwnerId(): string {
-  const ownerId = process.env.MODULAR_OWNER_ID;
-  if (!ownerId) {
-    throw new Error("MODULAR_OWNER_ID is not set");
+import { createSessionClient } from "@/lib/supabase/server";
+
+// Single source for the current owner_id. Reads the signed-in user's id
+// from their Supabase Auth session. middleware.ts already redirects/401s
+// any request without a session before a route handler runs, so the throw
+// below is a defensive fallback, not a per-request condition.
+export async function getOwnerId(): Promise<string> {
+  const supabase = await createSessionClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (error || !user) {
+    throw new Error("no authenticated user");
   }
-  return ownerId;
+  return user.id;
 }

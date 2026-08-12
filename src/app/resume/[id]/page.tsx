@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import { loadResumeComposition } from "@/lib/resume-composition-query";
 import { getSignedUrl } from "@/lib/storage";
 import { resumeDownloadFilename } from "@/lib/resume-filename";
@@ -23,7 +24,8 @@ export default async function ResumePage({
   const composition = await loadResumeComposition(id);
   if (!composition) notFound();
 
-  const { data: entryData, error: entryError } = await ownerScopedTable("bank_entry")
+  const ownerId = await getOwnerId();
+  const { data: entryData, error: entryError } = await ownerScopedTable("bank_entry", ownerId)
     .select(
       "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
     )

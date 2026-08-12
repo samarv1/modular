@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { asRow, asRows, ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import { CompositionError, compositionErrorStatus, setResumeComposition } from "@/lib/composition";
 import { dedupedName } from "@/lib/deduped-name";
 import { readJsonObject } from "@/lib/api-request";
 import { integerFieldError, nullableStringFieldError } from "@/lib/field-validation";
 import type { ResumeRow } from "@/lib/rows";
 
-async function ownerHasFolder(folderId: string | null | undefined): Promise<boolean> {
+async function ownerHasFolder(ownerId: string, folderId: string | null | undefined): Promise<boolean> {
   if (folderId === null || folderId === undefined) return true;
   const { data, error } = asRow<{ id: string }>(
-    await ownerScopedTable("resume_folder")
+    await ownerScopedTable("resume_folder", ownerId)
       .select("id")
       .eq("id", folderId)
       .maybeSingle(),
@@ -21,8 +22,9 @@ async function ownerHasFolder(folderId: string | null | undefined): Promise<bool
 // Ordered by creation, not last-edited — tabs stay put as you work instead
 // of reshuffling every time an autosave lands, the same way browser tabs do.
 export async function GET() {
+  const ownerId = await getOwnerId();
   const { data, error } = asRows<ResumeRow>(
-    await ownerScopedTable("resume")
+    await ownerScopedTable("resume", ownerId)
       .select("id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at")
       .order("created_at", { ascending: true }),
   );
@@ -55,10 +57,12 @@ export async function POST(request: Request) {
     folderId: body.folderId === null || typeof body.folderId === "string" ? body.folderId : undefined,
   };
 
+  const ownerId = await getOwnerId();
   if (typeof body.duplicateFromResumeId === "string") {
-    return duplicateResume(body.duplicateFromResumeId, title, position);
+    return duplicateResume(ownerId, body.duplicateFromResumeId, title, position);
   }
   return createBlankResume(
+    ownerId,
     typeof body.templateShellId === "string" ? body.templateShellId : undefined,
     title,
     position,
@@ -66,18 +70,19 @@ export async function POST(request: Request) {
 }
 
 async function createBlankResume(
+  ownerId: string,
   templateShellId: string | undefined,
   title: string,
   position: { positionX?: number; positionY?: number; folderId?: string | null },
 ) {
-  if (!(await ownerHasFolder(position.folderId))) {
+  if (!(await ownerHasFolder(ownerId, position.folderId))) {
     return NextResponse.json({ error: "folder not found" }, { status: 422 });
   }
 
   let shellId = templateShellId;
   if (shellId) {
     const { data: shell, error: shellError } = asRow<{ id: string }>(
-      await ownerScopedTable("template_shell")
+      await ownerScopedTable("template_shell", ownerId)
         .select("id")
         .eq("id", shellId)
         .maybeSingle(),
@@ -88,7 +93,7 @@ async function createBlankResume(
     }
   } else {
     const { data: shell, error: shellError } = asRow<{ id: string }>(
-      await ownerScopedTable("template_shell")
+      await ownerScopedTable("template_shell", ownerId)
         .select("id")
         .order("created_at", { ascending: false })
         .limit(1)
@@ -105,7 +110,7 @@ async function createBlankResume(
   }
 
   const { data, error } = asRow<ResumeRow>(
-    await ownerScopedTable("resume")
+    await ownerScopedTable("resume", ownerId)
       .insert({
         title,
         template_shell_id: shellId,
@@ -121,16 +126,17 @@ async function createBlankResume(
 }
 
 async function duplicateResume(
+  ownerId: string,
   sourceResumeId: string,
   title: string,
   position: { positionX?: number; positionY?: number; folderId?: string | null },
 ) {
-  if (!(await ownerHasFolder(position.folderId))) {
+  if (!(await ownerHasFolder(ownerId, position.folderId))) {
     return NextResponse.json({ error: "folder not found" }, { status: 422 });
   }
 
   const { data: source, error: sourceError } = asRow<{ id: string; template_shell_id: string }>(
-    await ownerScopedTable("resume").select("id, template_shell_id").eq("id", sourceResumeId).maybeSingle(),
+    await ownerScopedTable("resume", ownerId).select("id, template_shell_id").eq("id", sourceResumeId).maybeSingle(),
   );
   if (sourceError) throw new Error(sourceError.message);
   if (!source) {
@@ -138,7 +144,7 @@ async function duplicateResume(
   }
 
   const { data: sections, error: sectionsError } = asRows<{ id: string; title: string; position: number }>(
-    await ownerScopedTable("resume_section")
+    await ownerScopedTable("resume_section", ownerId)
       .select("id, title, position")
       .eq("resume_id", sourceResumeId)
       .order("position", { ascending: true }),
@@ -150,7 +156,7 @@ async function duplicateResume(
     bank_entry_id: string;
     position: number;
   }>(
-    await ownerScopedTable("resume_section_entry")
+    await ownerScopedTable("resume_section_entry", ownerId)
       .select("resume_section_id, bank_entry_id, position")
       .eq("resume_id", sourceResumeId)
       .order("position", { ascending: true }),
@@ -158,7 +164,7 @@ async function duplicateResume(
   if (entriesError) throw new Error(entriesError.message);
 
   const { data: newResume, error: createError } = asRow<ResumeRow>(
-    await ownerScopedTable("resume")
+    await ownerScopedTable("resume", ownerId)
       .insert({
         title,
         template_shell_id: source.template_shell_id,
@@ -181,7 +187,7 @@ async function duplicateResume(
   try {
     await setResumeComposition(newResume!.id, compositionSections);
   } catch (err) {
-    await ownerScopedTable("resume")
+    await ownerScopedTable("resume", ownerId)
       .delete()
       .eq("id", newResume!.id)
       .then(() => undefined, () => undefined);

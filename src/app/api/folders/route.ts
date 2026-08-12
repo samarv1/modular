@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import { dedupedName } from "@/lib/deduped-name";
 import { readJsonObject } from "@/lib/api-request";
 import { integerFieldError } from "@/lib/field-validation";
 import type { ResumeFolderRow } from "@/lib/rows";
 
 export async function GET() {
-  const { data, error } = await ownerScopedTable("resume_folder")
+  const ownerId = await getOwnerId();
+  const { data, error } = await ownerScopedTable("resume_folder", ownerId)
     .select("id, name, position_x, position_y, created_at")
     .order("created_at", { ascending: true });
   if (error) throw new Error((error as { message: string }).message);
@@ -28,7 +30,8 @@ export async function POST(request: Request) {
 
   const name = await dedupedName("resume_folder", "name", desiredName);
 
-  const { data, error } = await ownerScopedTable("resume_folder")
+  const ownerId = await getOwnerId();
+  const { data, error } = await ownerScopedTable("resume_folder", ownerId)
     .insert({ name, position_x: positionX, position_y: positionY })
     .select("id, name, position_x, position_y, created_at")
     .single();

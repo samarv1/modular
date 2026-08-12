@@ -1,4 +1,5 @@
 import { asRow, asRows, ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import { isUuid } from "@/lib/api-request";
 
 export interface ResumeMetaRow {
@@ -28,9 +29,10 @@ export async function loadResumeComposition(
   // nonexistent resume, not surface Postgres's "invalid input syntax for
   // type uuid" as a raw 500 — /resume/[id] can be hit with any route param.
   if (!isUuid(resumeId)) return null;
+  const ownerId = await getOwnerId();
 
   const { data: resume, error: resumeError } = asRow<ResumeMetaRow>(
-    await ownerScopedTable("resume")
+    await ownerScopedTable("resume", ownerId)
       .select(
         "id, title, template_shell_id, compile_status, compile_error, pdf_artifact_path, page_count, updated_at",
       )
@@ -41,7 +43,7 @@ export async function loadResumeComposition(
   if (!resume) return null;
 
   const { data: sections, error: sectionsError } = asRows<{ id: string; title: string; position: number }>(
-    await ownerScopedTable("resume_section")
+    await ownerScopedTable("resume_section", ownerId)
       .select("id, title, position")
       .eq("resume_id", resumeId)
       .order("position", { ascending: true }),
@@ -54,7 +56,7 @@ export async function loadResumeComposition(
     bank_entry_id: string;
     position: number;
   }>(
-    await ownerScopedTable("resume_section_entry")
+    await ownerScopedTable("resume_section_entry", ownerId)
       .select("id, resume_section_id, bank_entry_id, position")
       .eq("resume_id", resumeId)
       .order("position", { ascending: true }),

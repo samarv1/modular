@@ -5,6 +5,12 @@ import JSZip from "jszip";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
 import { ownerScopedTable } from "@/lib/db";
 
+// Route handlers now resolve ownerId from a real Supabase Auth session
+// (src/lib/owner.ts), which isn't available in this test environment —
+// stand in with the same fixed test owner id the live-DB fixtures below use.
+const testOwnerId = process.env.MODULAR_OWNER_ID!;
+vi.mock("@/lib/owner", () => ({ getOwnerId: async () => testOwnerId }));
+
 vi.mock("@/lib/storage", () => ({
   uploadArchive: vi.fn().mockResolvedValue(undefined),
   deleteArchive: vi.fn().mockResolvedValue(undefined),
@@ -81,11 +87,11 @@ describe("POST /api/imports — duplicate entry detection", () => {
 
   afterAll(async () => {
     for (const id of sourceResumeIds) {
-      await ownerScopedTable("bank_entry").delete().eq("source_resume_id", id);
-      await ownerScopedTable("source_resume").delete().eq("id", id);
+      await ownerScopedTable("bank_entry", testOwnerId).delete().eq("source_resume_id", id);
+      await ownerScopedTable("source_resume", testOwnerId).delete().eq("id", id);
     }
     if (templateShellId) {
-      await ownerScopedTable("template_shell").delete().eq("id", templateShellId);
+      await ownerScopedTable("template_shell", testOwnerId).delete().eq("id", templateShellId);
     }
   });
 
@@ -109,7 +115,7 @@ describe("POST /api/imports — duplicate entry detection", () => {
     sourceResumeIds.push(body.sourceResumeId);
 
     // Confirm no duplicate rows actually landed in bank_entry.
-    const { data: allEntries, error } = await ownerScopedTable("bank_entry")
+    const { data: allEntries, error } = await ownerScopedTable("bank_entry", testOwnerId)
       .select("raw_latex")
       .in("source_resume_id", sourceResumeIds);
     if (error) throw new Error(error.message);
@@ -175,11 +181,11 @@ describe("POST /api/imports — commit mode with overrides", () => {
 
   afterAll(async () => {
     for (const id of sourceResumeIds) {
-      await ownerScopedTable("bank_entry").delete().eq("source_resume_id", id);
-      await ownerScopedTable("source_resume").delete().eq("id", id);
+      await ownerScopedTable("bank_entry", testOwnerId).delete().eq("source_resume_id", id);
+      await ownerScopedTable("source_resume", testOwnerId).delete().eq("id", id);
     }
     if (templateShellId) {
-      await ownerScopedTable("template_shell").delete().eq("id", templateShellId);
+      await ownerScopedTable("template_shell", testOwnerId).delete().eq("id", templateShellId);
     }
   });
 

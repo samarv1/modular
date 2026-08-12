@@ -89,26 +89,28 @@ function applyOverrides(entries: FlatEntry[], overrides: EntryOverride[]): FlatE
 }
 
 async function cleanupFailedImport({
+  ownerId,
   archivePath,
   sourceResumeId,
   createdShellId,
 }: {
+  ownerId: string;
   archivePath: string;
   sourceResumeId?: string;
   createdShellId?: string;
 }) {
   if (sourceResumeId) {
-    await ownerScopedTable("bank_entry")
+    await ownerScopedTable("bank_entry", ownerId)
       .delete()
       .eq("source_resume_id", sourceResumeId)
       .then(() => undefined, () => undefined);
-    await ownerScopedTable("source_resume")
+    await ownerScopedTable("source_resume", ownerId)
       .delete()
       .eq("id", sourceResumeId)
       .then(() => undefined, () => undefined);
   }
   if (createdShellId) {
-    await ownerScopedTable("template_shell")
+    await ownerScopedTable("template_shell", ownerId)
       .delete()
       .eq("id", createdShellId)
       .then(() => undefined, () => undefined);
@@ -132,6 +134,7 @@ export async function POST(request: Request) {
     );
   }
   const mode = form.get("mode") === "preview" ? "preview" : "commit";
+  const ownerId = await getOwnerId();
 
   const zipBytes = new Uint8Array(await file.arrayBuffer());
 
@@ -177,6 +180,7 @@ export async function POST(request: Request) {
     // flags are informational only (dedup itself still runs at commit time).
     const { data: existingLatex, error: existingLatexError } = await ownerScopedTable(
       "bank_entry",
+      ownerId,
     ).select("raw_latex");
     if (existingLatexError) throw new Error(existingLatexError.message);
     const existingNormalized = new Set(
@@ -221,7 +225,6 @@ export async function POST(request: Request) {
     tags: [] as string[],
   }));
 
-  const ownerId = getOwnerId();
   const archivePath = `${ownerId}/${randomUUID()}.zip`;
   await uploadArchive(archivePath, zipBytes, "application/zip");
 
@@ -229,7 +232,7 @@ export async function POST(request: Request) {
   try {
     // First compatible upload for this fingerprint establishes the shell;
     // later ones reuse it (see PLAN.md: "first upload becomes the template shell").
-    const shells = ownerScopedTable("template_shell");
+    const shells = ownerScopedTable("template_shell", ownerId);
     const { data: existingShell, error: shellLookupError } = asRow<{ id: string }>(
       await shells
         .select("id")
@@ -266,7 +269,7 @@ export async function POST(request: Request) {
     });
 
     const { data: sourceResume, error: sourceResumeError } = asRow<{ id: string }>(
-      await ownerScopedTable("source_resume")
+      await ownerScopedTable("source_resume", ownerId)
         .insert({
           template_shell_id: templateShellId,
           archive_path: archivePath,
@@ -285,7 +288,7 @@ export async function POST(request: Request) {
     // (normalized) matches one already in this owner's bank, or another
     // entry earlier in this same upload batch.
     const { data: existingLatex, error: existingLatexError } =
-      await ownerScopedTable("bank_entry").select("raw_latex");
+      await ownerScopedTable("bank_entry", ownerId).select("raw_latex");
     if (existingLatexError) throw new Error(existingLatexError.message);
     const seen = new Set(
       ((existingLatex ?? []) as unknown as { raw_latex: string }[]).map((row) =>
@@ -319,7 +322,7 @@ export async function POST(request: Request) {
     }>(
       dedupedEntryRows.length === 0
         ? { data: [], error: null }
-        : await ownerScopedTable("bank_entry")
+        : await ownerScopedTable("bank_entry", ownerId)
             .insert(dedupedEntryRows)
             .select(
               "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
@@ -339,7 +342,7 @@ export async function POST(request: Request) {
       })),
     });
   } catch (error) {
-    await cleanupFailedImport({ archivePath, ...partial });
+    await cleanupFailedImport({ ownerId, archivePath, ...partial });
     throw error;
   }
 }

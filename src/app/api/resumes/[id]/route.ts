@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import { loadResumeComposition } from "@/lib/resume-composition-query";
 import { dedupedName } from "@/lib/deduped-name";
 import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
@@ -54,8 +55,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
   const fieldError = integerFieldError(body, ["positionX", "positionY"]) ?? nullableStringFieldError(body, "folderId");
   if (fieldError) return fieldError;
+  const ownerId = await getOwnerId();
   if (typeof body.folderId === "string") {
-    const { data: folder, error: folderError } = await ownerScopedTable("resume_folder")
+    const { data: folder, error: folderError } = await ownerScopedTable("resume_folder", ownerId)
       .select("id")
       .eq("id", body.folderId)
       .maybeSingle();
@@ -73,7 +75,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   }
 
-  const { data, error } = await ownerScopedTable("resume")
+  const { data, error } = await ownerScopedTable("resume", ownerId)
     .update(values)
     .eq("id", id)
     .select("id, title, folder_id, position_x, position_y")

@@ -1,4 +1,5 @@
 import { asRow, asRows, ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import type { BankEntryKind, ResumeComposition } from "@/lib/adapters/types";
 
 // Compile-specific composition load: unlike loadResumeComposition (the
@@ -8,14 +9,16 @@ import type { BankEntryKind, ResumeComposition } from "@/lib/adapters/types";
 export async function loadCompileComposition(
   resumeId: string,
 ): Promise<{ adapterId: string; title: string; composition: ResumeComposition } | null> {
+  const ownerId = await getOwnerId();
+
   const { data: resume, error: resumeError } = asRow<{ template_shell_id: string; title: string }>(
-    await ownerScopedTable("resume").select("template_shell_id, title").eq("id", resumeId).maybeSingle(),
+    await ownerScopedTable("resume", ownerId).select("template_shell_id, title").eq("id", resumeId).maybeSingle(),
   );
   if (resumeError) throw new Error(resumeError.message);
   if (!resume) return null;
 
   const { data: shell, error: shellError } = asRow<{ adapter_id: string; preamble: string }>(
-    await ownerScopedTable("template_shell")
+    await ownerScopedTable("template_shell", ownerId)
       .select("adapter_id, preamble")
       .eq("id", resume.template_shell_id)
       .maybeSingle(),
@@ -24,7 +27,7 @@ export async function loadCompileComposition(
   if (!shell) return null;
 
   const { data: sections, error: sectionsError } = asRows<{ id: string; title: string; position: number }>(
-    await ownerScopedTable("resume_section")
+    await ownerScopedTable("resume_section", ownerId)
       .select("id, title, position")
       .eq("resume_id", resumeId)
       .order("position", { ascending: true }),
@@ -36,7 +39,7 @@ export async function loadCompileComposition(
     position: number;
     bank_entry: { kind: BankEntryKind; raw_latex: string; required_packages: string[] } | null;
   }>(
-    await ownerScopedTable("resume_section_entry")
+    await ownerScopedTable("resume_section_entry", ownerId)
       .select("resume_section_id, position, bank_entry(kind, raw_latex, required_packages)")
       .eq("resume_id", resumeId)
       .order("position", { ascending: true }),

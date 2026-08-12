@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
 import { deleteOwnedRow } from "@/lib/delete-owned-row";
 
@@ -32,7 +33,8 @@ export async function PATCH(
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   }
 
-  const { data, error } = await ownerScopedTable("bank_entry")
+  const ownerId = await getOwnerId();
+  const { data, error } = await ownerScopedTable("bank_entry", ownerId)
     .update(values)
     .eq("id", id)
     .select("id, display_name, tags")

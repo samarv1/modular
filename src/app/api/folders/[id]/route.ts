@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import { dedupedName } from "@/lib/deduped-name";
 import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
 import { integerFieldError } from "@/lib/field-validation";
@@ -29,7 +30,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   }
 
-  const { data, error } = await ownerScopedTable("resume_folder")
+  const ownerId = await getOwnerId();
+  const { data, error } = await ownerScopedTable("resume_folder", ownerId)
     .update(values)
     .eq("id", id)
     .select("id, name, position_x, position_y, created_at")

@@ -20,8 +20,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "resume not found" }, { status: 404 });
   }
 
+  const ownerId = await getOwnerId();
   const { data: resumeRow, error: resumeError } = asRow<{ compile_status: string; template_shell_id: string }>(
-    await ownerScopedTable("resume").select("compile_status, template_shell_id").eq("id", id).maybeSingle(),
+    await ownerScopedTable("resume", ownerId).select("compile_status, template_shell_id").eq("id", id).maybeSingle(),
   );
   if (resumeError) throw new Error(resumeError.message);
   if (!resumeRow) {
@@ -35,7 +36,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }
 
   const { data: shellRow, error: shellError } = asRow<{ archive_path: string; root_file: string }>(
-    await ownerScopedTable("template_shell")
+    await ownerScopedTable("template_shell", ownerId)
       .select("archive_path, root_file")
       .eq("id", resumeRow.template_shell_id)
       .maybeSingle(),
@@ -55,10 +56,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const originalZip = await downloadArchive(shellRow.archive_path);
   const exportZip = await buildExportArchive(originalZip, shellRow.root_file, assembled.source);
 
-  const zipPath = `exports/${getOwnerId()}/${id}/${randomUUID()}.zip`;
+  const zipPath = `exports/${ownerId}/${id}/${randomUUID()}.zip`;
   await uploadArchive(zipPath, exportZip, "application/zip");
 
-  const { error: updateError } = await ownerScopedTable("resume")
+  const { error: updateError } = await ownerScopedTable("resume", ownerId)
     .update({ latex_export_path: zipPath })
     .eq("id", id);
   if (updateError) throw new Error((updateError as { message: string }).message);

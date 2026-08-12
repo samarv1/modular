@@ -1,5 +1,4 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { getOwnerId } from "@/lib/owner";
 
 // supabase-js returns loosely-typed results here (see the `as any` note on
 // select() below); these cast a result back to the shape the caller expects.
@@ -10,14 +9,16 @@ export function asRows<T>(result: { data: unknown; error: unknown }) {
   return result as { data: T[] | null; error: { message: string } | null };
 }
 
-// Every table in 0001_init.sql carries owner_id. Since RLS is off (server
-// uses the service-role key), this wrapper is what actually enforces
-// isolation — route handlers should read/write through this, not a bare
-// createServiceClient() call, so a forgotten owner_id filter is a
-// grep-able mistake rather than a silent one.
-export function ownerScopedTable(table: string) {
+// Every table in 0001_init.sql carries owner_id. RLS is enabled as a
+// backstop (0008_rls.sql), but the service-role key used here bypasses it —
+// this wrapper is what actually enforces isolation, so route handlers should
+// read/write through this, not a bare createServiceClient() call, and not
+// forget to resolve+pass ownerId (a forgotten filter is a grep-able mistake
+// rather than a silent one). Callers resolve ownerId once via
+// `await getOwnerId()` and pass it in, rather than this function resolving
+// its own session on every call.
+export function ownerScopedTable(table: string, ownerId: string) {
   const client = createServiceClient();
-  const ownerId = getOwnerId();
   return {
     // `as any` on the columns string sidesteps supabase-js's recursive
     // select-string type parser, which (without generated Database types)

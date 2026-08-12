@@ -38,8 +38,9 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   const adapter = getAdapterOrThrow(loaded.adapterId);
   const assembled = adapter.assemble(loaded.composition);
 
+  const ownerId = await getOwnerId();
   const requestId = randomUUID();
-  const { error: startError } = await ownerScopedTable("resume")
+  const { error: startError } = await ownerScopedTable("resume", ownerId)
     .update({ compile_status: "compiling", last_compile_request_id: requestId, compile_error: null })
     .eq("id", id);
   if (startError) throw new Error(startError.message);
@@ -55,7 +56,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     // rather than presenting it as a resume-content error.
     const message = err instanceof Error ? err.message : String(err);
     const compileError = `Compile environment error: ${message}`;
-    await ownerScopedTable("resume")
+    await ownerScopedTable("resume", ownerId)
       .update({ compile_status: "failed", compile_error: compileError })
       .eq("id", id)
       .eq("last_compile_request_id", requestId);
@@ -63,7 +64,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   }
 
   if (!result.success || !result.pdf) {
-    await ownerScopedTable("resume")
+    await ownerScopedTable("resume", ownerId)
       .update({ compile_status: "failed", compile_error: result.log.slice(-4000) })
       .eq("id", id)
       .eq("last_compile_request_id", requestId);
@@ -73,12 +74,12 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     );
   }
 
-  const pdfPath = `compiled/${getOwnerId()}/${id}/${requestId}.pdf`;
+  const pdfPath = `compiled/${ownerId}/${id}/${requestId}.pdf`;
   await uploadArchive(pdfPath, new Uint8Array(result.pdf), "application/pdf");
 
   const compileStatus = result.pageCount && result.pageCount > 1 ? "blocked_multipage" : "success";
 
-  const { error: finishError } = await ownerScopedTable("resume")
+  const { error: finishError } = await ownerScopedTable("resume", ownerId)
     .update({
       compile_status: compileStatus,
       compile_error: null,

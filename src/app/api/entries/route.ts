@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { asRows, ownerScopedTable } from "@/lib/db";
+import { getOwnerId } from "@/lib/owner";
 import type { BankEntryRow } from "@/lib/rows";
 
 // ?sourceResumeId= scopes to one upload's entries — used by the import
@@ -8,8 +9,9 @@ import type { BankEntryRow } from "@/lib/rows";
 // contributed, not the whole bank.
 export async function GET(request: Request) {
   const sourceResumeId = new URL(request.url).searchParams.get("sourceResumeId");
+  const ownerId = await getOwnerId();
 
-  let query = ownerScopedTable("bank_entry").select(
+  let query = ownerScopedTable("bank_entry", ownerId).select(
     "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
   );
   if (sourceResumeId) query = query.eq("source_resume_id", sourceResumeId);
