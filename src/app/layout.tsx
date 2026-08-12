@@ -19,9 +19,26 @@ const mono = Martian_Mono({
   variable: "--font-martian-mono",
 });
 
+const siteUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+  : process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "http://localhost:3000";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "Modular",
   description: "Edit your resumes with ease",
+  openGraph: {
+    title: "Modular",
+    description: "Edit your resumes with ease",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "Modular",
+    description: "Edit your resumes with ease",
+  },
 };
 
 export default function RootLayout({

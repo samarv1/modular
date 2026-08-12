@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>Modular - snap-fit</title>
+  <style>
+    .ink{fill:#12181c} .accent{fill:#1f5f8b} .muted{fill:#5b6570}
+    @media (prefers-color-scheme:dark){
+      .ink{fill:#eef1f0} .accent{fill:#4a94c7} .muted{fill:#aab6b2}
+    }
+  </style>
+  <mask id="notch">
+    <rect x="0" y="0" width="32" height="32" fill="#fff"/>
+    <circle cx="15" cy="16" r="6" fill="#000"/>
+  </mask>
+  <rect class="ink" x="3" y="4" width="12" height="24" rx="2"/>
+  <circle class="ink" cx="15" cy="16" r="4"/>
+  <rect class="accent" x="17" y="4" width="12" height="24" rx="2" mask="url(#notch)"/>
+</svg>
