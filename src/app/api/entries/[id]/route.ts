@@ -3,9 +3,13 @@ import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
 import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
 import { deleteOwnedRow } from "@/lib/delete-owned-row";
+import { renderEntry, renderHeader } from "@/lib/synthesize-jake-latex";
+import { ExtractedEntrySchema, HeaderDataSchema } from "@/lib/resume-extraction-schema";
 
-// Bank entries are immutable raw LaTeX (PLAN.md) — display name and tags
-// are the only editable fields, so this is the only write path onto bank_entry.
+// Bank entries' raw LaTeX is regenerated from structured fields, not typed
+// directly — display name, tags, and a structured `entry`/`header` patch
+// (kind-dependent, see resume-extraction-schema.ts) are the editable
+// surface, so this is the only write path onto bank_entry.
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -29,6 +33,22 @@ export async function PATCH(
     }
     values.tags = [...new Set(body.tags.map((t: string) => t.trim()).filter(Boolean))];
   }
+  // `entry` (subheading_entry/project_entry/section_chunk) and `header`
+  // (header_chunk) are mutually exclusive, matching the two shapes a
+  // reverse-parsed bank_entry can come back as (bank-entry-fields.ts).
+  if (body.entry !== undefined) {
+    const parsed = ExtractedEntrySchema.safeParse(body.entry);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "invalid entry fields" }, { status: 400 });
+    }
+    values.raw_latex = renderEntry(parsed.data);
+  } else if (body.header !== undefined) {
+    const parsed = HeaderDataSchema.safeParse(body.header);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "invalid header fields" }, { status: 400 });
+    }
+    values.raw_latex = renderHeader(parsed.data);
+  }
   if (Object.keys(values).length === 0) {
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   }
@@ -37,7 +57,7 @@ export async function PATCH(
   const { data, error } = await ownerScopedTable("bank_entry", ownerId)
     .update(values)
     .eq("id", id)
-    .select("id, display_name, tags")
+    .select("id, display_name, tags, raw_latex")
     .single();
 
   if (error) {

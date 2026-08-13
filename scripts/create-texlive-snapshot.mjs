@@ -3,9 +3,8 @@
 // layers on collection-latexextra — every recommended/fonts/language
 // collection plus the long tail of "extra" packages (ulem, xifthen,
 // ifmtarg, preprint/fullpage, etc.). Picking packages one at a time turned
-// into real whack-a-mole against actual Jake variants (see git history on
-// this file); collection-latexextra is the standard fix and is still far
-// short of scheme-full. Prints the resulting snapshot id — add it to .env
+// into real whack-a-mole against actual Jake variants; collection-latexextra
+// is the standard fix and is still far short of scheme-full. Prints the resulting snapshot id — add it to .env
 // as TEXLIVE_SNAPSHOT_ID; the compile route refuses to run without it.
 // Re-run this only when the TeX Live version needs bumping.
 import { Sandbox } from "@vercel/sandbox";

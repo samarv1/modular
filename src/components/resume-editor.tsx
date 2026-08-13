@@ -575,6 +575,7 @@ export function ResumeEditor({
                           ...e,
                           ...(values.displayName !== undefined ? { display_name: values.displayName } : {}),
                           ...(values.tags !== undefined ? { tags: values.tags } : {}),
+                          ...(values.rawLatex !== undefined ? { raw_latex: values.rawLatex } : {}),
                         }
                       : e,
                   ),

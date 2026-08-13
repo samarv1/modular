@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { EntryEditor, HeaderFieldsEditor } from "@/components/bank/entry-editor";
 import type { ExtractedEntry, ResumeExtraction } from "@/lib/resume-extraction-schema";
 import type { BankEntryRow } from "@/lib/rows";
 
@@ -130,23 +131,10 @@ export function PdfImportBody({
       </div>
 
       <div className="flex max-h-[45vh] flex-col gap-4 overflow-y-auto pr-1 [scrollbar-gutter:stable]">
-        <div className="flex flex-col gap-2 rounded-md border border-line-strong p-2.5">
-          <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-fg">Name & Contact</div>
-          <input
-            value={extraction.header.name}
-            onChange={(e) => setExtraction({ ...extraction, header: { ...extraction.header, name: e.target.value } })}
-            className="min-w-0 border-b border-line-strong bg-transparent text-[12.5px] font-semibold outline-none focus:border-brand"
-            placeholder="Name"
-          />
-          <input
-            value={extraction.header.contactLine}
-            onChange={(e) =>
-              setExtraction({ ...extraction, header: { ...extraction.header, contactLine: e.target.value } })
-            }
-            className="min-w-0 border-b border-line-strong bg-transparent text-[11.5px] outline-none focus:border-brand"
-            placeholder="email | phone | links"
-          />
-        </div>
+        <HeaderFieldsEditor
+          header={extraction.header}
+          onChange={(patch) => setExtraction({ ...extraction, header: { ...extraction.header, ...patch } })}
+        />
 
         {extraction.sections.map((section, sectionIndex) => (
           <div key={sectionIndex} className="flex flex-col gap-2">
@@ -186,118 +174,3 @@ export function PdfImportBody({
   );
 }
 
-function bulletsToText(bullets: string[]): string {
-  return bullets.join("\n");
-}
-
-function textToBullets(text: string): string[] {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function EntryEditor({
-  entry,
-  onChange,
-  onRemove,
-}: {
-  entry: ExtractedEntry;
-  onChange: (patch: Partial<ExtractedEntry>) => void;
-  onRemove: () => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5 rounded-md border border-line-strong p-2.5">
-      <div className="flex items-start gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          {entry.kind === "subheading_entry" && (
-            <>
-              <div className="flex gap-2">
-                <input
-                  value={entry.title ?? ""}
-                  onChange={(e) => onChange({ title: e.target.value })}
-                  placeholder="Title / role"
-                  className="min-w-0 flex-1 border-b border-line-strong bg-transparent text-[12.5px] font-semibold outline-none focus:border-brand"
-                />
-                <input
-                  value={entry.date ?? ""}
-                  onChange={(e) => onChange({ date: e.target.value })}
-                  placeholder="Date"
-                  className="w-32 shrink-0 border-b border-line-strong bg-transparent text-[11.5px] outline-none focus:border-brand"
-                />
-              </div>
-              <div className="flex gap-2">
-                <input
-                  value={entry.organization ?? ""}
-                  onChange={(e) => onChange({ organization: e.target.value })}
-                  placeholder="Organization"
-                  className="min-w-0 flex-1 border-b border-line-strong bg-transparent text-[11.5px] italic outline-none focus:border-brand"
-                />
-                <input
-                  value={entry.location ?? ""}
-                  onChange={(e) => onChange({ location: e.target.value })}
-                  placeholder="Location"
-                  className="w-32 shrink-0 border-b border-line-strong bg-transparent text-[11.5px] italic outline-none focus:border-brand"
-                />
-              </div>
-              <textarea
-                value={bulletsToText(entry.bullets ?? [])}
-                onChange={(e) => onChange({ bullets: textToBullets(e.target.value) })}
-                placeholder="One bullet per line"
-                rows={Math.max(2, entry.bullets?.length ?? 2)}
-                className="min-w-0 resize-y rounded-sm border border-line-strong bg-transparent p-1.5 text-[11.5px] outline-none focus:border-brand"
-              />
-            </>
-          )}
-          {entry.kind === "project_entry" && (
-            <>
-              <div className="flex gap-2">
-                <input
-                  value={entry.title ?? ""}
-                  onChange={(e) => onChange({ title: e.target.value })}
-                  placeholder="Project name"
-                  className="min-w-0 flex-1 border-b border-line-strong bg-transparent text-[12.5px] font-semibold outline-none focus:border-brand"
-                />
-                <input
-                  value={entry.date ?? ""}
-                  onChange={(e) => onChange({ date: e.target.value })}
-                  placeholder="Date"
-                  className="w-32 shrink-0 border-b border-line-strong bg-transparent text-[11.5px] outline-none focus:border-brand"
-                />
-              </div>
-              <input
-                value={entry.stack ?? ""}
-                onChange={(e) => onChange({ stack: e.target.value })}
-                placeholder="Stack (optional)"
-                className="min-w-0 border-b border-line-strong bg-transparent text-[11.5px] italic outline-none focus:border-brand"
-              />
-              <textarea
-                value={bulletsToText(entry.bullets ?? [])}
-                onChange={(e) => onChange({ bullets: textToBullets(e.target.value) })}
-                placeholder="One bullet per line"
-                rows={Math.max(2, entry.bullets?.length ?? 2)}
-                className="min-w-0 resize-y rounded-sm border border-line-strong bg-transparent p-1.5 text-[11.5px] outline-none focus:border-brand"
-              />
-            </>
-          )}
-          {entry.kind === "section_chunk" && (
-            <textarea
-              value={(entry.items ?? []).join("\n")}
-              onChange={(e) => onChange({ items: textToBullets(e.target.value) })}
-              placeholder="Category: values (one per line)"
-              rows={Math.max(2, entry.items?.length ?? 2)}
-              className="min-w-0 resize-y rounded-sm border border-line-strong bg-transparent p-1.5 text-[11.5px] outline-none focus:border-brand"
-            />
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="shrink-0 rounded-sm px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-fg hover:bg-danger/10 hover:text-danger"
-        >
-          Remove
-        </button>
-      </div>
-    </div>
-  );
-}

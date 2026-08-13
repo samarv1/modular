@@ -50,7 +50,7 @@ function renderBullets(bullets: string[]): string {
   return `\n      \\resumeItemListStart\n${items}\n      \\resumeItemListEnd`;
 }
 
-function renderEntry(entry: ExtractedEntry): string {
+export function renderEntry(entry: ExtractedEntry): string {
   if (entry.kind === "subheading_entry") {
     return (
       `    \\resumeSubheading\n` +
@@ -101,7 +101,7 @@ function renderSectionBody(entries: ExtractedEntry[]): string {
   return `  \\resumeSubHeadingListStart\n${rendered}\n  \\resumeSubHeadingListEnd`;
 }
 
-function renderHeader(header: ResumeExtraction["header"]): string {
+export function renderHeader(header: ResumeExtraction["header"]): string {
   return (
     `\\begin{center}\n` +
     `    \\textbf{\\Huge \\scshape ${escapeLatex(header.name)}} \\\\ \\vspace{1pt}\n` +

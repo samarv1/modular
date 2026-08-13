@@ -1,20 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { useDraggable } from "@dnd-kit/core";
-import { Eye, GripVertical, Upload as UploadIcon } from "lucide-react";
+import { Pencil, GripVertical, Upload as UploadIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { parseJakeEntryPreview } from "@/lib/jake-entry-preview";
+import { EntryEditor, HeaderFieldsEditor } from "@/components/bank/entry-editor";
+import { bankEntryToExtractedEntry, bankEntryToHeaderData } from "@/lib/bank-entry-fields";
 import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
 import { sectionGroupLabel } from "@/lib/section-label";
+import type { ExtractedEntry } from "@/lib/resume-extraction-schema";
 import type { BankEntryRow } from "@/lib/rows";
 import { BANK_DRAG_PREFIX } from "@/components/dnd-ids";
 import { ImportReviewModal } from "@/components/home/import-review-modal";
@@ -50,16 +54,16 @@ export function BankPane({
   usedEntryIds: Set<string>;
   // Mirrors a display-name/tags edit up to the parent so the outline pane
   // and bank pane render from the same canonical entry state.
-  onEntryPatched?: (id: string, values: { displayName?: string; tags?: string[] }) => void;
+  onEntryPatched?: (id: string, values: { displayName?: string; tags?: string[]; rawLatex?: string }) => void;
   onEntriesImported?: (entries: BankEntryRow[]) => void;
 }) {
-  const [previewEntryId, setPreviewEntryId] = useState<string | null>(null);
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [entryError, setEntryError] = useState<string | null>(null);
   const patchVersions = useRef(new Map<string, number>());
   // Derived from `entries` (not a captured snapshot) so tag edits made
   // inside the modal itself show up immediately rather than going stale.
-  const previewEntry = entries.find((e) => e.id === previewEntryId) ?? null;
+  const editingEntry = entries.find((e) => e.id === editingEntryId) ?? null;
 
   // Grouped by display section. Within that, group headers follow a fixed
   // priority — Education, Experience, Leadership, Projects, then Other last
@@ -162,7 +166,7 @@ export function BankPane({
                     key={entry.id}
                     entry={entry}
                     onPatch={patchEntry}
-                    onOpenPreview={() => setPreviewEntryId(entry.id)}
+                    onOpenEdit={() => setEditingEntryId(entry.id)}
                   />
                 ))}
               </div>
@@ -172,16 +176,19 @@ export function BankPane({
       </ScrollArea>
 
       <Dialog
-        open={previewEntry !== null}
+        open={editingEntry !== null}
         onOpenChange={(open) => {
-          if (!open) setPreviewEntryId(null);
+          if (!open) setEditingEntryId(null);
         }}
       >
-        {previewEntry && (
-          <EntryPreviewDialog
-            key={`${previewEntry.id}:${previewEntry.display_name}`}
-            entry={previewEntry}
-            onPatch={patchEntry}
+        {editingEntry && (
+          <EntryEditDialog
+            key={`${editingEntry.id}:${editingEntry.raw_latex}`}
+            entry={editingEntry}
+            onSaved={(values) => {
+              onEntryPatched?.(editingEntry.id, values);
+              setEditingEntryId(null);
+            }}
           />
         )}
       </Dialog>
@@ -189,99 +196,66 @@ export function BankPane({
   );
 }
 
-function EntryPreviewDialog({
+function EntryEditDialog({
   entry,
-  onPatch,
+  onSaved,
 }: {
   entry: BankEntryRow;
-  onPatch: (id: string, values: { displayName?: string; tags?: string[] }) => void;
+  onSaved: (values: { displayName?: string; rawLatex?: string }) => void;
 }) {
-  const preview = useMemo(
-    () => parseJakeEntryPreview(entry.kind, entry.raw_latex),
-    [entry.kind, entry.raw_latex],
-  );
+  const isHeader = entry.kind === "header_chunk";
+  const [headerDraft, setHeaderDraft] = useState(() => bankEntryToHeaderData(entry));
+  const [entryDraft, setEntryDraft] = useState<ExtractedEntry>(() => bankEntryToExtractedEntry(entry));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [titleDraft, setTitleDraft] = useState(entry.display_name);
-  const titleInputRef = useRef<HTMLInputElement>(null);
-  const cancelTitleRef = useRef(false);
-
-  // Keep the title from growing past the modal's title row instead of
-  // letting it silently scroll off — once a keystroke would overflow the
-  // input's box, drop it. Only while the field is actually focused, so an
-  // already-long title isn't retroactively truncated just from opening the
-  // dialog.
-  useEffect(() => {
-    const el = titleInputRef.current;
-    if (!el || document.activeElement !== el) return;
-    if (el.scrollWidth > el.clientWidth) {
-      setTitleDraft((cur) => cur.slice(0, -1));
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/entries/${entry.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(isHeader ? { header: headerDraft } : { entry: entryDraft }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(typeof body?.error === "string" ? body.error : "could not save this entry");
+      }
+      onSaved({ displayName: body?.entry?.display_name, rawLatex: body?.entry?.raw_latex });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "could not save this entry");
+      setSaving(false);
     }
-  }, [titleDraft]);
-
-  function commitTitle() {
-    if (cancelTitleRef.current) {
-      cancelTitleRef.current = false;
-      setTitleDraft(entry.display_name);
-      return;
-    }
-    const trimmed = titleDraft.trim();
-    if (!trimmed) {
-      setTitleDraft(entry.display_name);
-      return;
-    }
-    if (trimmed !== entry.display_name) onPatch(entry.id, { displayName: trimmed });
   }
 
   return (
-    <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[8.5in]" showCloseButton={false}>
+    <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[8.5in]">
       <DialogHeader>
         <DialogTitle className="flex items-baseline gap-2 leading-normal">
           <span className="shrink-0 font-mono text-xs whitespace-nowrap text-muted-fg uppercase tracking-wide">
             {sectionGroupLabel(entry.source_section)}
           </span>
-          <input
-            ref={titleInputRef}
-            className="min-w-0 flex-1 border-b border-line-strong bg-transparent text-[13px] font-semibold outline-none focus:border-brand"
-            value={titleDraft}
-            onChange={(e) => setTitleDraft(e.target.value)}
-            onBlur={commitTitle}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.currentTarget.blur();
-              if (e.key === "Escape") {
-                cancelTitleRef.current = true;
-                setTitleDraft(entry.display_name);
-                e.currentTarget.blur();
-              }
-            }}
-          />
         </DialogTitle>
-        <DialogDescription className="sr-only">Preview of {entry.display_name}</DialogDescription>
+        <DialogDescription className="sr-only">Edit {entry.display_name}</DialogDescription>
       </DialogHeader>
 
-      {/* Overleaf/compiled-PDF look — literal serif stack (font-latex),
-          scoped to this block only. The rest of the modal stays in the
-          app's own mono/sans scheme. */}
-      <div className="rounded-sm border border-line-strong bg-white p-5 font-latex text-[#111] shadow-[0_1px_0_var(--line-strong)]">
-        {preview.title && (
-          <div className="flex items-baseline justify-between gap-3">
-            <div className="text-[15px] font-bold">{preview.title}</div>
-            {preview.subtitle && <div className="shrink-0 text-[12.5px]">{preview.subtitle}</div>}
-          </div>
-        )}
-        {(preview.meta || preview.location) && (
-          <div className="mt-0.5 flex items-baseline justify-between gap-3 text-[12.5px] italic">
-            <span>{preview.meta}</span>
-            <span className="shrink-0">{preview.location}</span>
-          </div>
-        )}
-        {preview.bullets.length > 0 && (
-          <ul className="mt-2 list-disc space-y-1 pl-4 text-[12.5px] not-italic">
-            {preview.bullets.map((bullet, i) => (
-              <li key={i}>{bullet}</li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {isHeader ? (
+        <HeaderFieldsEditor
+          header={headerDraft}
+          onChange={(patch) => setHeaderDraft((prev) => ({ ...prev, ...patch }))}
+        />
+      ) : (
+        <EntryEditor entry={entryDraft} onChange={(patch) => setEntryDraft((prev) => ({ ...prev, ...patch }))} />
+      )}
+
+      {error && <span className="text-[11.5px] text-danger">{error}</span>}
+
+      <DialogFooter>
+        <Button onClick={save} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </DialogFooter>
     </DialogContent>
   );
 }
@@ -308,11 +282,11 @@ export function BankEntryCardVisual({ entry }: { entry: BankEntryRow }) {
 function EntryCard({
   entry,
   onPatch,
-  onOpenPreview,
+  onOpenEdit,
 }: {
   entry: BankEntryRow;
   onPatch: (id: string, values: { displayName?: string; tags?: string[] }) => void;
-  onOpenPreview: () => void;
+  onOpenEdit: () => void;
 }) {
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(entry.display_name);
@@ -339,12 +313,12 @@ function EntryCard({
   });
 
   function onPointerDownGuarded(e: PointerEvent<HTMLDivElement>) {
-    // Don't hijack typing in the name-edit input, or the preview button's
-    // own click — everything else on the card can start a drag.
+    // Don't hijack typing in the name-edit input, or the edit button's own
+    // click — everything else on the card can start a drag.
     if (e.target instanceof HTMLElement && e.target.closest("input, button")) return;
     listeners?.onPointerDown?.(e);
   }
-  function stopPreviewButtonDrag(e: MouseEvent) {
+  function stopEditButtonDrag(e: MouseEvent) {
     e.stopPropagation();
   }
 
@@ -419,18 +393,18 @@ function EntryCard({
             {resumeSourceLabel(entry)}
           </div>
         </div>
-        {/* Explicit preview action — the card itself is the drag source
-            (grab cursor everywhere), so opening the preview needed its own
+        {/* Explicit edit action — the card itself is the drag source
+            (grab cursor everywhere), so opening the editor needed its own
             target instead of overloading a plain click on a draggable. */}
         <button
-          onClick={onOpenPreview}
-          onPointerDown={stopPreviewButtonDrag}
+          onClick={onOpenEdit}
+          onPointerDown={stopEditButtonDrag}
           data-cursor-override="pointer"
-          title="Preview"
-          aria-label={`Preview ${entry.display_name}`}
+          title="Edit"
+          aria-label={`Edit ${entry.display_name}`}
           className="pointer-events-auto shrink-0 self-center cursor-pointer rounded-sm p-1 text-faint hover:bg-surface-sunken hover:text-brand"
         >
-          <Eye className="pointer-events-none size-3.5" />
+          <Pencil className="pointer-events-none size-3.5" />
         </button>
       </CardContent>
     </Card>

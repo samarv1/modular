@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -14,14 +14,13 @@ import { parseJakeEntryPreview } from "@/lib/jake-entry-preview";
 import type { BankEntryRow } from "@/lib/rows";
 import { UploadZone } from "@/components/home/upload-zone";
 import { PdfImportBody } from "@/components/home/pdf-import-review-modal";
+import { EditSourceResumeBody } from "@/components/home/edit-source-resume-body";
 
 interface PreviewEntry {
   key: string;
-  // Import mode only (position in the flat extraction order, used to
-  // build /api/imports' overrides payload).
-  index?: number;
-  // Edit mode only (the real bank_entry id, used for PATCH/DELETE calls).
-  entryId?: string;
+  // Position in the flat extraction order, used to build /api/imports'
+  // overrides payload.
+  index: number;
   kind: string;
   sourceSection: string;
   displayName: string;
@@ -40,14 +39,14 @@ interface EntryEdit {
 
 type Phase = "idle" | "loading" | "mismatch" | "review" | "committing" | "pdf";
 
-// Owns two lifecycles that share the same review UI:
+// Owns two lifecycles inside the same Dialog shell:
 //  - import: pick a file, preview what the extractor found (nothing
 //    persisted yet), fix mistakes, then commit via POST /api/imports.
-//  - edit (editSourceResume set): load an already-imported upload's real
-//    bank_entry rows and let the user rename/remove them directly (PATCH /
-//    DELETE /api/entries/:id), "edit it as if importing for the first
-//    time" per the desktop's Bank folder.
-// Cancel before a successful commit/save is always a no-op for import mode
+//  - edit (editSourceResume set): hands off entirely to
+//    EditSourceResumeBody, which loads an already-imported upload's real
+//    bank_entry rows into the same structured field editor the PDF-import
+//    flow uses, and saves changes directly (PATCH/DELETE /api/entries/:id).
+// Cancel before a successful commit is always a no-op for import mode
 // (mode=preview never touches storage or the DB); for edit mode it just
 // discards the local, unsaved edits.
 export function ImportReviewModal({
@@ -99,46 +98,6 @@ export function ImportReviewModal({
     onOpenChange(false);
   }
 
-  async function loadExisting(sourceResumeId: string) {
-    setPhase("loading");
-    setErrorMessage(null);
-    try {
-      const res = await fetch(`/api/entries?sourceResumeId=${sourceResumeId}`);
-      const body = await res.json().catch(() => null);
-      if (!res.ok || !Array.isArray(body?.entries)) {
-        setErrorMessage("This resume's entries could not be loaded.");
-        setPhase("review");
-        return;
-      }
-      const mapped: PreviewEntry[] = (body.entries as BankEntryRow[]).map((entry) => ({
-        key: entry.id,
-        entryId: entry.id,
-        kind: entry.kind,
-        sourceSection: entry.source_section,
-        displayName: entry.display_name,
-        rawLatex: entry.raw_latex,
-        isDuplicate: false,
-      }));
-      setEntries(mapped);
-      setEdits({});
-      setPhase("review");
-    } catch {
-      setErrorMessage("This resume's entries could not be loaded.");
-      setPhase("review");
-    }
-  }
-
-  // Opening in edit mode skips the file-picking phase entirely and loads
-  // straight into a review of that upload's real entries. Deferred a tick
-  // (not called directly) so the resulting setPhase("loading") doesn't fire
-  // synchronously inside the effect itself.
-  useEffect(() => {
-    if (!open || !editSourceResume) return;
-    const sourceResumeId = editSourceResume.id;
-    Promise.resolve().then(() => loadExisting(sourceResumeId));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, editSourceResume?.id]);
-
   async function loadPreview(selected: File) {
     setFile(selected);
     setPhase("loading");
@@ -179,16 +138,13 @@ export function ImportReviewModal({
 
   // Duplicates default to excluded unless the user explicitly opts back in
   // (see PreviewEntryRow): an entry with no edit yet falls back to its
-  // isDuplicate flag rather than always-included. Always false in edit
-  // mode, so existing entries start included, matching "edit it as if
-  // importing for the first time."
+  // isDuplicate flag rather than always-included.
   function isExcluded(entry: PreviewEntry): boolean {
     return edits[entry.key]?.excluded ?? entry.isDuplicate;
   }
 
   const includedCount = entries.filter((e) => !isExcluded(e)).length;
   const duplicateCount = entries.filter((e) => e.isDuplicate).length;
-  const hasChanges = Object.keys(edits).length > 0;
 
   // Grouped by section, in first-appearance order. Mirrors the bank pane's
   // own grouping so the review screen reads like a preview of where things
@@ -205,44 +161,6 @@ export function ImportReviewModal({
     }
     return order.map((label): [string, PreviewEntry[]] => [label, byLabel.get(label)!]);
   }, [entries]);
-
-  async function saveEdits() {
-    setPhase("committing");
-    setErrorMessage(null);
-    const results = await Promise.allSettled(
-      entries.map(async (entry) => {
-        const edit = edits[entry.key];
-        if (!edit || !entry.entryId) return;
-        if (edit.excluded) {
-          const res = await fetch(`/api/entries/${entry.entryId}`, { method: "DELETE" });
-          if (!res.ok) {
-            const body = await res.json().catch(() => null);
-            throw new Error(typeof body?.error === "string" ? body.error : "could not remove an entry");
-          }
-          return;
-        }
-        if (edit.displayName !== undefined) {
-          const res = await fetch(`/api/entries/${entry.entryId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ displayName: edit.displayName }),
-          });
-          if (!res.ok) {
-            const body = await res.json().catch(() => null);
-            throw new Error(typeof body?.error === "string" ? body.error : "could not rename an entry");
-          }
-        }
-      }),
-    );
-    const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
-    if (failed) {
-      setErrorMessage(failed.reason instanceof Error ? failed.reason.message : "some changes could not be saved");
-      setPhase("review");
-      return;
-    }
-    onImported([]);
-    close();
-  }
 
   async function commitImport() {
     if (!file) return;
@@ -291,104 +209,106 @@ export function ImportReviewModal({
           </DialogTitle>
         </DialogHeader>
 
-        {phase === "idle" && !editSourceResume && (
-          <div className="flex flex-col gap-2">
-            <UploadZone onFileSelected={handleFileSelected} onRejected={setErrorMessage} />
-            {errorMessage && <span className="text-[11.5px] text-danger">{errorMessage}</span>}
-          </div>
-        )}
-
-        {phase === "pdf" && pdfFile && (
-          <PdfImportBody
-            file={pdfFile}
-            onImported={(imported) => {
-              onImported(imported);
+        {editSourceResume ? (
+          <EditSourceResumeBody
+            sourceResumeId={editSourceResume.id}
+            onSaved={() => {
+              onImported([]);
               close();
             }}
-            onCancel={reset}
+            onCancel={close}
           />
-        )}
-
-        {phase === "loading" && (
-          <div className="py-8 text-center text-[12.5px] text-faint">
-            {editSourceResume ? "Loading…" : "Parsing your resume…"}
-          </div>
-        )}
-
-        {phase === "mismatch" && mismatchReport && (
-          <div className="flex flex-col gap-3">
-            <div className="rounded-md border border-danger/30 bg-danger/5 p-3 text-[12.5px] text-danger">
-              {mismatchReport.reason}
-              {mismatchReport.details.length > 0 && (
-                <ul className="mt-1.5 list-disc pl-4">
-                  {mismatchReport.details.map((detail, i) => (
-                    <li key={i}>{detail}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <Button variant="outline" onClick={reset} className="self-start">
-              Try another file
-            </Button>
-          </div>
-        )}
-
-        {(phase === "review" || phase === "committing") && (
+        ) : (
           <>
-            <div className="text-[11.5px] text-faint">
-              {`Found ${groups.length} section${groups.length === 1 ? "" : "s"}, ${entries.length} entr${entries.length === 1 ? "y" : "ies"}.`}
-              {duplicateCount > 0 && ` ${duplicateCount} already in your bank.`}
-              {" View simplified previews."}
-            </div>
+            {phase === "idle" && (
+              <div className="flex flex-col gap-2">
+                <UploadZone onFileSelected={handleFileSelected} onRejected={setErrorMessage} />
+                {errorMessage && <span className="text-[11.5px] text-danger">{errorMessage}</span>}
+              </div>
+            )}
 
-            {/* Bounded + self-scrolling, independent of the dialog's own
-                sizing (the entry list is the only part that can get long,
-                many sections, so it's the only part that scrolls). Header,
-                summary, and footer stay put above/below it. Plain
-                overflow-y-auto, not the app's ScrollArea (its Root didn't
-                reliably pick up a bounded height from just max-h inside
-                this Dialog, which reintroduced the earlier
-                content-spilling-past-the-card bug). scrollbar-gutter:stable
-                reserves the native scrollbar's width up front instead, so
-                it doesn't reflow row content when it appears mid-scroll
-                (the actual cause of the flicker). */}
-            <div className="flex max-h-[45vh] flex-col gap-4 overflow-y-auto pr-1 [scrollbar-gutter:stable]">
-              {groups.map(([label, groupEntries]) => (
-                <div key={label} className="flex flex-col gap-2">
-                  <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-fg">
-                    {sectionGroupLabel(label)}
-                  </div>
-                  {groupEntries.map((entry) => (
-                    <PreviewEntryRow
-                      key={entry.key}
-                      entry={entry}
-                      edit={edits[entry.key]}
-                      onEdit={(patch) => updateEdit(entry.key, patch)}
-                    />
+            {phase === "pdf" && pdfFile && (
+              <PdfImportBody
+                file={pdfFile}
+                onImported={(imported) => {
+                  onImported(imported);
+                  close();
+                }}
+                onCancel={reset}
+              />
+            )}
+
+            {phase === "loading" && (
+              <div className="py-8 text-center text-[12.5px] text-faint">Parsing your resume…</div>
+            )}
+
+            {phase === "mismatch" && mismatchReport && (
+              <div className="flex flex-col gap-3">
+                <div className="rounded-md border border-danger/30 bg-danger/5 p-3 text-[12.5px] text-danger">
+                  {mismatchReport.reason}
+                  {mismatchReport.details.length > 0 && (
+                    <ul className="mt-1.5 list-disc pl-4">
+                      {mismatchReport.details.map((detail, i) => (
+                        <li key={i}>{detail}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <Button variant="outline" onClick={reset} className="self-start">
+                  Try another file
+                </Button>
+              </div>
+            )}
+
+            {(phase === "review" || phase === "committing") && (
+              <>
+                <div className="text-[11.5px] text-faint">
+                  {`Found ${groups.length} section${groups.length === 1 ? "" : "s"}, ${entries.length} entr${entries.length === 1 ? "y" : "ies"}.`}
+                  {duplicateCount > 0 && ` ${duplicateCount} already in your bank.`}
+                  {" View simplified previews."}
+                </div>
+
+                {/* Bounded + self-scrolling, independent of the dialog's own
+                    sizing (the entry list is the only part that can get long,
+                    many sections, so it's the only part that scrolls). Header,
+                    summary, and footer stay put above/below it. Plain
+                    overflow-y-auto, not the app's ScrollArea (its Root didn't
+                    reliably pick up a bounded height from just max-h inside
+                    this Dialog, which reintroduced the earlier
+                    content-spilling-past-the-card bug). scrollbar-gutter:stable
+                    reserves the native scrollbar's width up front instead, so
+                    it doesn't reflow row content when it appears mid-scroll
+                    (the actual cause of the flicker). */}
+                <div className="flex max-h-[45vh] flex-col gap-4 overflow-y-auto pr-1 [scrollbar-gutter:stable]">
+                  {groups.map(([label, groupEntries]) => (
+                    <div key={label} className="flex flex-col gap-2">
+                      <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-fg">
+                        {sectionGroupLabel(label)}
+                      </div>
+                      {groupEntries.map((entry) => (
+                        <PreviewEntryRow
+                          key={entry.key}
+                          entry={entry}
+                          edit={edits[entry.key]}
+                          onEdit={(patch) => updateEdit(entry.key, patch)}
+                        />
+                      ))}
+                    </div>
                   ))}
                 </div>
-              ))}
-            </div>
 
-            {errorMessage && <span className="text-[11.5px] text-danger">{errorMessage}</span>}
+                {errorMessage && <span className="text-[11.5px] text-danger">{errorMessage}</span>}
 
-            <DialogFooter>
-              <Button variant="outline" onClick={close} disabled={phase === "committing"}>
-                Cancel
-              </Button>
-              <Button
-                onClick={editSourceResume ? saveEdits : commitImport}
-                disabled={phase === "committing" || (editSourceResume ? !hasChanges : includedCount === 0)}
-              >
-                {phase === "committing"
-                  ? editSourceResume
-                    ? "Saving…"
-                    : "Importing…"
-                  : editSourceResume
-                    ? "Save changes"
-                    : `Approve (${includedCount})`}
-              </Button>
-            </DialogFooter>
+                <DialogFooter>
+                  <Button variant="outline" onClick={close} disabled={phase === "committing"}>
+                    Cancel
+                  </Button>
+                  <Button onClick={commitImport} disabled={phase === "committing" || includedCount === 0}>
+                    {phase === "committing" ? "Importing…" : `Approve (${includedCount})`}
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
           </>
         )}
       </DialogContent>

@@ -6,7 +6,7 @@
 
 // str[start] must be "{". Returns the group's inner content and the index
 // just past its closing brace (matching depth, so nested braces are safe).
-function readBraceGroup(str: string, start: number): { content: string; end: number } {
+export function readBraceGroup(str: string, start: number): { content: string; end: number } {
   let depth = 0;
   let i = start;
   for (; i < str.length; i++) {
@@ -22,7 +22,7 @@ function readBraceGroup(str: string, start: number): { content: string; end: num
   return { content: str.slice(start + 1, i - 1), end: i };
 }
 
-function readBalancedArgs(str: string, count: number): string[] {
+export function readBalancedArgs(str: string, count: number): string[] {
   const args: string[] = [];
   let i = 0;
   for (let a = 0; a < count; a++) {
@@ -95,7 +95,7 @@ const ESCAPES: Record<string, string> = {
 // this recursively descends into macro args so nested formatting (e.g.
 // \textbf{\underline{x}} or a stray grouping brace like {\underline{x}})
 // degrades correctly instead of leaking raw LaTeX into the preview.
-function cleanLatexText(input: string): string {
+export function cleanLatexText(input: string): string {
   let i = 0;
   const n = input.length;
   let out = "";
@@ -193,7 +193,7 @@ function cleanLatexText(input: string): string {
     .trim();
 }
 
-function extractItems(latex: string): string[] {
+export function extractItems(latex: string): string[] {
   const items: string[] = [];
   // The negative lookahead matters: LaTeX macro names are maximal runs of
   // letters, so a bare \\resumeItem would also match as a prefix of
@@ -212,14 +212,14 @@ function extractItems(latex: string): string[] {
 // list into one arg: \textbf{Name} $|$ \emph{Skill, Skill, Skill}. Pull the
 // bold part out as the title and the emph part out as its own line — a
 // naive whole-string clean concatenates them into one run-on title.
-function extractMacroArg(text: string, macro: string): string | undefined {
+export function extractMacroArg(text: string, macro: string): string | undefined {
   const idx = text.indexOf(`\\${macro}`);
   if (idx === -1) return undefined;
   const [arg] = readBalancedArgs(text.slice(idx + macro.length + 1), 1);
   return arg;
 }
 
-function parseProjectTitle(titleLine: string): { title: string; meta?: string } {
+export function parseProjectTitle(titleLine: string): { title: string; meta?: string } {
   const bold = extractMacroArg(titleLine, "textbf");
   if (bold === undefined) return { title: cleanLatexText(titleLine) };
   const emph = extractMacroArg(titleLine, "emph");
@@ -239,20 +239,31 @@ export interface EntryPreview {
 // Jake's-resume "Technical Skills" idiom is a single itemize/\item wrapping
 // several `\textbf{Category}{: values}` lines separated by `\\`. Handle that
 // specifically rather than dumping stripped-but-still-brace-laden text.
-function parseSectionChunkPreview(rawLatex: string): EntryPreview {
+// Inverse of renderSectionChunkBody (synthesize-jake-latex.ts): recombines
+// each `\textbf{Category}{: values}` pair back into one "Category: values"
+// line, one per `\\`-separated line. Shared by the preview (below) and the
+// structured reverse-parser (bank-entry-fields.ts), which both need the same
+// per-line split, just packaged differently.
+export function parseSectionChunkLines(rawLatex: string): string[] {
   const body = rawLatex
     .replace(/\\begin\{[^}]*\}(\[[^\]]*\])?/g, " ")
     .replace(/\\end\{[^}]*\}/g, " ")
     .replace(/\\(?:small|normalsize|item)\b/g, " ")
     .replace(/\\textbf\{([^{}]*)\}\{([^{}]*)\}/g, "$1$2"); // Category + {: values} idiom
 
-  const lines = body
+  return body
     .split("\\\\")
     .map((line) => cleanLatexText(line).replace(/[{}]/g, ""))
     .map((line) => line.trim())
     .filter(Boolean);
+}
 
+function parseSectionChunkPreview(rawLatex: string): EntryPreview {
+  const lines = parseSectionChunkLines(rawLatex);
   if (lines.length > 1) return { title: "", bullets: lines };
+  const body = rawLatex
+    .replace(/\\begin\{[^}]*\}(\[[^\]]*\])?/g, " ")
+    .replace(/\\end\{[^}]*\}/g, " ");
   const text = (lines[0] ?? cleanLatexText(body).replace(/[{}]/g, "")).trim();
   return { title: text.slice(0, 200) || "Section content", bullets: [] };
 }
@@ -263,7 +274,7 @@ function parseSectionChunkPreview(rawLatex: string): EntryPreview {
 // `\\`-separated lines ⇒ bullets" heuristic (that's for the Technical
 // Skills idiom). First line is the name/title; the rest join into one
 // contact line.
-function parseHeaderChunkPreview(rawLatex: string): EntryPreview {
+export function parseHeaderChunkPreview(rawLatex: string): EntryPreview {
   const body = rawLatex
     .replace(/\\begin\{[^}]*\}(\[[^\]]*\])?/g, " ")
     .replace(/\\end\{[^}]*\}/g, " ");
