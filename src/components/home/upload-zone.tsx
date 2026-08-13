@@ -8,11 +8,15 @@ export interface UploadZoneHandle {
   open: () => void;
 }
 
+const MAX_PDF_BYTES = 25 * 1024 * 1024;
+
 // Pure file-selection: validates the picked/dropped file and hands it up via
-// onFileSelected. Owns no fetch/status of its own — the import review modal
-// (src/components/home/import-review-modal.tsx) does the actual upload, so
-// this can be reused both there and as a plain "open the file picker"
-// trigger (e.g. the bank pane's Upload button, hideDropzone: true).
+// onFileSelected. Owns no fetch/status of its own — the import review modals
+// (import-review-modal.tsx for .zip, pdf-import-review-modal.tsx for .pdf)
+// do the actual upload, so this can be reused both there and as a plain
+// "open the file picker" trigger (e.g. the bank pane's Upload button,
+// hideDropzone: true). Accepts either a LaTeX export or a plain PDF resume;
+// the caller branches on extension to pick which review modal to open.
 export const UploadZone = forwardRef<
   UploadZoneHandle,
   {
@@ -29,15 +33,24 @@ export const UploadZone = forwardRef<
   }));
 
   function handleFile(file: File) {
-    if (!file.name.toLowerCase().endsWith(".zip")) {
-      onRejected?.("only .zip exports are supported");
+    const name = file.name.toLowerCase();
+    if (name.endsWith(".zip")) {
+      if (file.size > MAX_ARCHIVE_BYTES) {
+        onRejected?.("that ZIP is too large to import");
+        return;
+      }
+      onFileSelected(file);
       return;
     }
-    if (file.size > MAX_ARCHIVE_BYTES) {
-      onRejected?.("that ZIP is too large to import");
+    if (name.endsWith(".pdf")) {
+      if (file.size > MAX_PDF_BYTES) {
+        onRejected?.("that PDF is too large to import");
+        return;
+      }
+      onFileSelected(file);
       return;
     }
-    onFileSelected(file);
+    onRejected?.("only a resume .zip or .pdf is supported");
   }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
@@ -51,7 +64,7 @@ export const UploadZone = forwardRef<
     <input
       ref={inputRef}
       type="file"
-      accept=".zip"
+      accept=".zip,.pdf"
       className="hidden"
       onChange={(e) => {
         const file = e.target.files?.[0];
@@ -76,7 +89,7 @@ export const UploadZone = forwardRef<
       }`}
     >
       <Upload className="size-3.5 shrink-0" />
-      <span>Drop a resume ZIP, or</span>
+      <span>Drop a resume ZIP or PDF, or</span>
       <button
         onClick={() => inputRef.current?.click()}
         className="font-mono text-[10.5px] uppercase tracking-wide text-brand hover:underline"

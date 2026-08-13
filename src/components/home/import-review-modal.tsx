@@ -13,6 +13,7 @@ import { sectionGroupLabel } from "@/lib/section-label";
 import { parseJakeEntryPreview } from "@/lib/jake-entry-preview";
 import type { BankEntryRow } from "@/lib/rows";
 import { UploadZone } from "@/components/home/upload-zone";
+import { PdfImportBody } from "@/components/home/pdf-import-review-modal";
 
 interface PreviewEntry {
   key: string;
@@ -37,7 +38,7 @@ interface EntryEdit {
   includeDuplicate?: boolean;
 }
 
-type Phase = "idle" | "loading" | "mismatch" | "review" | "committing";
+type Phase = "idle" | "loading" | "mismatch" | "review" | "committing" | "pdf";
 
 // Owns two lifecycles that share the same review UI:
 //  - import: pick a file, preview what the extractor found (nothing
@@ -62,6 +63,7 @@ export function ImportReviewModal({
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [file, setFile] = useState<File | null>(null);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [mismatchReport, setMismatchReport] = useState<{ reason: string; details: string[] } | null>(
     null,
@@ -72,10 +74,24 @@ export function ImportReviewModal({
   function reset() {
     setPhase("idle");
     setFile(null);
+    setPdfFile(null);
     setErrorMessage(null);
     setMismatchReport(null);
     setEntries([]);
     setEdits({});
+  }
+
+  // The shared UploadZone accepts both a LaTeX export (.zip) and a plain PDF
+  // resume (see upload-zone.tsx) — a PDF has no LaTeX to parse, so it skips
+  // straight to the structured-extraction review body (pdf-import-review-modal.tsx)
+  // instead of loadPreview's mode=preview call to /api/imports.
+  function handleFileSelected(selected: File) {
+    if (selected.name.toLowerCase().endsWith(".pdf")) {
+      setPdfFile(selected);
+      setPhase("pdf");
+      return;
+    }
+    loadPreview(selected);
   }
 
   function close() {
@@ -266,14 +282,31 @@ export function ImportReviewModal({
     >
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[640px]" showCloseButton={phase !== "committing"}>
         <DialogHeader>
-          <DialogTitle>{editSourceResume ? `Edit "${editSourceResume.displayName}"` : "Review import"}</DialogTitle>
+          <DialogTitle>
+            {editSourceResume
+              ? `Edit "${editSourceResume.displayName}"`
+              : phase === "pdf"
+                ? "Review PDF import"
+                : "Review import"}
+          </DialogTitle>
         </DialogHeader>
 
         {phase === "idle" && !editSourceResume && (
           <div className="flex flex-col gap-2">
-            <UploadZone onFileSelected={loadPreview} onRejected={setErrorMessage} />
+            <UploadZone onFileSelected={handleFileSelected} onRejected={setErrorMessage} />
             {errorMessage && <span className="text-[11.5px] text-danger">{errorMessage}</span>}
           </div>
+        )}
+
+        {phase === "pdf" && pdfFile && (
+          <PdfImportBody
+            file={pdfFile}
+            onImported={(imported) => {
+              onImported(imported);
+              close();
+            }}
+            onCancel={reset}
+          />
         )}
 
         {phase === "loading" && (

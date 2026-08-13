@@ -1,0 +1,81 @@
+import { generateText } from "ai";
+import { google } from "@ai-sdk/google";
+import { ResumeExtractionSchema, type ResumeExtraction } from "./resume-extraction-schema";
+
+// Direct Google provider rather than the Vercel AI Gateway: the Gateway
+// requires a card on file on the Vercel team before it'll serve any model
+// request, while a Google AI Studio API key (GOOGLE_GENERATIVE_AI_API_KEY)
+// works on Gemini's free tier with no card.
+const MODEL = google("gemini-3.5-flash");
+
+// Schema described in the prompt and parsed/validated with Zod ourselves,
+// rather than passed as a native `responseSchema` via `Output.object` —
+// verified against this model: with native structured output enabled, the
+// model dumps its own reasoning/self-talk into a string field instead of
+// producing clean values (reproduced with reasoning fully disabled too, so
+// it isn't a thinking-channel leak — the model just doesn't follow
+// responseSchema-constrained field content reliably here). Plain
+// prompted-JSON generation does not have this failure mode.
+const EXAMPLE_SHAPE = `{
+  "header": { "name": "string", "contactLine": "string" },
+  "sections": [
+    {
+      "title": "string",
+      "entries": [
+        {
+          "kind": "subheading_entry | project_entry | section_chunk",
+          "sourceSection": "string (matches the section title)",
+          "title": "string, optional",
+          "organization": "string, optional",
+          "stack": "string, optional",
+          "date": "string, optional",
+          "location": "string, optional",
+          "bullets": ["string", "..."],
+          "items": ["string", "..."]
+        }
+      ]
+    }
+  ]
+}`;
+
+const SYSTEM_PROMPT = `You turn a resume (given as markdown, extracted from a PDF) into structured data. Respond with ONLY a single JSON object matching this exact shape, no other text, no markdown code fences:
+${EXAMPLE_SHAPE}
+
+Rules:
+- Every section becomes one entry in "sections". Prefer these canonical section titles when the content matches: "Education", "Experience", "Projects", "Technical Skills". Use the resume's own heading text for anything that doesn't fit one of those.
+- "subheading_entry": each item is a role/degree at an organization with a date range (jobs, education). Put the role/degree title in "title", the employer/school in "organization".
+- "project_entry": each item is a named project, optionally with a tech stack in "stack".
+- "section_chunk": use when a section isn't a list of distinct roles/projects (e.g. Technical Skills, Certifications, a summary) — one string per line in "items", e.g. "Languages: Java, Python, C++".
+- Keep bullet/line text close to verbatim; do not invent content that isn't in the source.
+- "header" is the name and contact line at the top of the resume (email, phone, links), not a section.
+- Every entry needs "sourceSection" set to that entry's section title, matching exactly.`;
+
+export class ResumeExtractionError extends Error {}
+
+function stripCodeFences(text: string): string {
+  return text.trim().replace(/^```(?:json)?\n?/, "").replace(/```$/, "");
+}
+
+export async function extractResumeStructure(markdown: string): Promise<ResumeExtraction> {
+  const { text } = await generateText({
+    model: MODEL,
+    system: SYSTEM_PROMPT,
+    prompt: markdown,
+    maxOutputTokens: 16000,
+  });
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(stripCodeFences(text));
+  } catch {
+    throw new ResumeExtractionError("the model did not return valid JSON");
+  }
+
+  const result = ResumeExtractionSchema.safeParse(parsedJson);
+  if (!result.success) {
+    throw new ResumeExtractionError(
+      `extraction did not match the expected shape: ${result.error.issues.map((i) => i.message).join("; ")}`,
+    );
+  }
+  return result.data;
+}

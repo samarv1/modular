@@ -47,7 +47,14 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
+  // api/pdf-to-markdown is excluded: it's a root-level Python Vercel
+  // Function, not a Next.js route, but this middleware still runs in front
+  // of it. It's called only server-to-server from src/lib/pdf-to-markdown.ts
+  // — that call has no browser session cookie to carry, so a Supabase-
+  // session gate here would 401 it unconditionally. It does no database
+  // access; src/lib/pdf-to-markdown.ts authenticates the call with its own
+  // shared secret instead (see PDF_TO_MARKDOWN_SECRET).
   matcher: [
-    "/((?!login|auth/callback|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|opengraph-image).*)",
+    "/((?!login|auth/callback|api/pdf-to-markdown|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|opengraph-image).*)",
   ],
 };
