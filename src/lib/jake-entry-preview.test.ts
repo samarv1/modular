@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseJakeEntryPreview } from "./jake-entry-preview";
+import { extractItems, parseHeaderChunkPreview, parseProjectTitle } from "./jake-entry-preview";
 
-describe("parseJakeEntryPreview header_chunk", () => {
+describe("parseHeaderChunkPreview", () => {
   it("renders the name as the title and the contact line as meta, not as bullets", () => {
-    const preview = parseJakeEntryPreview(
-      "header_chunk",
+    const preview = parseHeaderChunkPreview(
       `\\begin{center}
     \\textbf{\\Huge \\scshape Jake Ryan} \\\\ \\vspace{1pt}
     \\small 123-456-7890 $|$ \\href{mailto:x@x.com}{\\underline{jake@su.edu}} $|$
@@ -18,10 +17,9 @@ describe("parseJakeEntryPreview header_chunk", () => {
   });
 });
 
-describe("parseJakeEntryPreview resumeItemListStart/End", () => {
+describe("extractItems resumeItemListStart/End", () => {
   it("doesn't duplicate the first bullet by matching \\resumeItem inside \\resumeItemListStart/End", () => {
-    const preview = parseJakeEntryPreview(
-      "subheading_entry",
+    const bullets = extractItems(
       `\\resumeSubheading
         {University of California, Davis}{Davis, CA}
         {Bachelor of Science in Computer Science}{Jun. 2026}
@@ -29,18 +27,14 @@ describe("parseJakeEntryPreview resumeItemListStart/End", () => {
           \\resumeItem{GPA: 3.84 Coursework: Artificial Intelligence, Human-Computer Interaction, Data Structures \\& Algorithms}
         \\resumeItemListEnd`,
     );
-    expect(preview.bullets).toEqual([
+    expect(bullets).toEqual([
       "GPA: 3.84 Coursework: Artificial Intelligence, Human-Computer Interaction, Data Structures & Algorithms",
     ]);
   });
 });
 
-describe("parseJakeEntryPreview bullet cleaning", () => {
-  const bulletPreview = (bulletLatex: string) =>
-    parseJakeEntryPreview(
-      "subheading_entry",
-      `\\resumeSubheading{Title}{Date}{Org}{Location}\\resumeItem{${bulletLatex}}`,
-    ).bullets[0];
+describe("extractItems bullet cleaning", () => {
+  const bulletPreview = (bulletLatex: string) => extractItems(`\\resumeItem{${bulletLatex}}`)[0];
 
   it("strips \\underline{} instead of leaking it", () => {
     expect(bulletPreview("Built \\underline{interactive product tours} and led the redesign")).toBe(
@@ -88,11 +82,10 @@ describe("parseJakeEntryPreview bullet cleaning", () => {
   });
 });
 
-describe("parseJakeEntryPreview project titles", () => {
+describe("parseProjectTitle", () => {
   it("splits bold title and emph tech stack even when nested", () => {
-    const preview = parseJakeEntryPreview(
-      "project_entry",
-      "\\resumeProjectHeading{\\textbf{\\underline{My Project}} $|$ \\emph{React, Node}}{2024}",
+    const preview = parseProjectTitle(
+      "\\textbf{\\underline{My Project}} $|$ \\emph{React, Node}",
     );
     expect(preview.title).toBe("My Project");
     expect(preview.meta).toBe("React, Node");

@@ -9,8 +9,8 @@ import { DesktopIconSlot, IconGlyphButton, IconLabel } from "@/components/home/d
 // look), not a bordered card with a line icon inside — dragging moves the
 // actual page shape.
 //
-// TODO(Phase 7 — compile worker): once resumes have a compiled PDF, render
-// an actual first-page thumbnail here instead of this blank placeholder.
+// TODO: render an actual first-page thumbnail from the resume's compiled
+// PDF (pdf_artifact_path) here instead of this blank placeholder.
 export function DocumentGlyph() {
   return (
     <div className="relative h-16 w-12">

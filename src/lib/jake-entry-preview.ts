@@ -258,16 +258,6 @@ export function parseSectionChunkLines(rawLatex: string): string[] {
     .filter(Boolean);
 }
 
-function parseSectionChunkPreview(rawLatex: string): EntryPreview {
-  const lines = parseSectionChunkLines(rawLatex);
-  if (lines.length > 1) return { title: "", bullets: lines };
-  const body = rawLatex
-    .replace(/\\begin\{[^}]*\}(\[[^\]]*\])?/g, " ")
-    .replace(/\\end\{[^}]*\}/g, " ");
-  const text = (lines[0] ?? cleanLatexText(body).replace(/[{}]/g, "")).trim();
-  return { title: text.slice(0, 200) || "Section content", bullets: [] };
-}
-
 // The name/contact block (see extract.ts's headerSection) is centered plain
 // text — a name line, then a `\\`-separated contact line — not an itemized
 // list, so it must not go through parseSectionChunkPreview's "multiple
@@ -286,39 +276,4 @@ export function parseHeaderChunkPreview(rawLatex: string): EntryPreview {
 
   const [title, ...rest] = lines;
   return { title: title ?? "", meta: rest.join(" ") || undefined, bullets: [] };
-}
-
-export function parseJakeEntryPreview(kind: string, rawLatex: string): EntryPreview {
-  const bullets = extractItems(rawLatex);
-
-  if (kind === "header_chunk") return parseHeaderChunkPreview(rawLatex);
-
-  if (kind === "project_entry") {
-    const idx = rawLatex.indexOf("\\resumeProjectHeading");
-    if (idx === -1) return { title: "Untitled project", bullets };
-    const [titleLine, date] = readBalancedArgs(
-      rawLatex.slice(idx + "\\resumeProjectHeading".length),
-      2,
-    );
-    const { title, meta } = parseProjectTitle(titleLine);
-    return { title, subtitle: cleanLatexText(date), meta, bullets };
-  }
-
-  if (kind === "subheading_entry") {
-    const idx = rawLatex.indexOf("\\resumeSubheading");
-    if (idx === -1) return { title: "Untitled entry", bullets };
-    const [title, date, org, location] = readBalancedArgs(
-      rawLatex.slice(idx + "\\resumeSubheading".length),
-      4,
-    );
-    return {
-      title: cleanLatexText(title),
-      subtitle: cleanLatexText(date),
-      meta: cleanLatexText(org),
-      location: cleanLatexText(location),
-      bullets,
-    };
-  }
-
-  return parseSectionChunkPreview(rawLatex);
 }

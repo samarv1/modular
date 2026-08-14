@@ -15,13 +15,15 @@ const eslintConfig = defineConfig([
       ],
     },
   },
-  // Override default ignores of eslint-config-next.
+  // Extends (not replaces) eslint-config-next's default ignores, plus local
+  // Supabase CLI artifacts that shouldn't be linted.
   globalIgnores([
-    // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "supabase/.temp/**",
+    "supabase/.branches/**",
   ]),
 ]);
 

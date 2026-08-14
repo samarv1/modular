@@ -3,6 +3,7 @@ import { checkJakeContract } from "./fingerprint";
 import { collapseWhitespace, documentBody, nodeToPlainText, parseJakeSource } from "./parse";
 import { ENTRY_BOUNDARY_MACROS } from "./macros";
 import { declaredPackages } from "./packages";
+import { entryDisplayName } from "@/lib/entry-display-name";
 
 function isMeaningful(node: LatexNode): boolean {
   return node.type !== "whitespace" && node.type !== "parbreak" && node.type !== "comment";
@@ -13,17 +14,19 @@ function argText(node: LatexNode, argIndex: number): string {
   return arg ? collapseWhitespace(nodeToPlainText(arg.content)) : "";
 }
 
-function entryDisplayName(node: LatexNode): string {
-  if (node.content === "resumeProjectHeading") {
+// Pulls the (title, organization) pair a boundary node's display name is
+// derived from, then defers to the shared entryDisplayName rule.
+function nodeDisplayName(node: LatexNode, kind: "project_entry" | "subheading_entry"): string {
+  if (kind === "project_entry") {
     // arg0 is typically `\textbf{Name} $|$ \emph{tech, stack}` — plain-texting
     // the whole group runs the name and the tech stack together. Pull just
     // the \textbf{} part when present.
     const arg0 = node.args?.[0]?.content ?? [];
     const bold = arg0.find((n) => n.type === "macro" && n.content === "textbf");
-    if (bold?.args?.[0]) return collapseWhitespace(nodeToPlainText(bold.args[0].content));
-    return argText(node, 0);
+    const title = bold?.args?.[0] ? collapseWhitespace(nodeToPlainText(bold.args[0].content)) : argText(node, 0);
+    return entryDisplayName(kind, title, undefined, "");
   }
-  return [argText(node, 0), argText(node, 2)].filter(Boolean).join(" — ");
+  return entryDisplayName(kind, argText(node, 0), argText(node, 2), "");
 }
 
 /**
@@ -73,10 +76,11 @@ function extractSectionEntries(
       ? next.node.position!.start.offset
       : (fallbackEnd ?? node.position!.end.offset);
     const startOffset = node.position!.start.offset;
+    const kind = node.content === "resumeProjectHeading" ? "project_entry" : "subheading_entry";
     return {
-      kind: node.content === "resumeProjectHeading" ? "project_entry" : "subheading_entry",
+      kind,
       sourceSection: sectionTitle,
-      displayName: entryDisplayName(node),
+      displayName: nodeDisplayName(node, kind),
       rawLatex: source.slice(startOffset, endOffset),
       sourceOffsetStart: startOffset,
       sourceOffsetEnd: endOffset,

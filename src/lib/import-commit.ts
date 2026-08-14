@@ -4,11 +4,8 @@ import { dedupedName } from "@/lib/deduped-name";
 import { uploadArchive, deleteArchive } from "@/lib/storage";
 import type { ExtractedResume } from "@/lib/adapters/types";
 import { renderEntry, renderHeader } from "@/lib/synthesize-jake-latex";
-import {
-  ExtractedEntrySchema,
-  HeaderDataSchema,
-  type ExtractedEntry as ExtractedEntryFields,
-} from "@/lib/resume-extraction-schema";
+import { ExtractedEntrySchema, HeaderDataSchema } from "@/lib/resume-extraction-schema";
+import { entryDisplayName } from "@/lib/entry-display-name";
 
 // Shared by both import entry points (POST /api/imports for real .zip
 // uploads, POST /api/pdf-imports for synthesized-from-PDF ones): everything
@@ -71,18 +68,6 @@ export type EntryOverride = {
   headerFields?: unknown;
 };
 
-// Mirrors extract.ts's entryDisplayName/extractSectionEntries exactly (same
-// per-kind fields, same "title, organization" join for subheading_entry, same
-// section-title fallback for section_chunk), so an edited entry's bank label
-// uses the identical convention an untouched one already got at parse time.
-function deriveDisplayName(entry: ExtractedEntryFields): string {
-  if (entry.kind === "project_entry") return entry.title ?? "";
-  if (entry.kind === "subheading_entry") {
-    return [entry.title, entry.organization].filter(Boolean).join(" — ");
-  }
-  return entry.sourceSection;
-}
-
 export function parseOverrides(raw: unknown): EntryOverride[] {
   let parsed: unknown = raw;
   if (typeof raw === "string") {
@@ -136,7 +121,12 @@ export function applyOverrides(entries: FlatEntry[], overrides: EntryOverride[])
         );
       }
       rawLatex = renderEntry(parsed.data);
-      displayName = deriveDisplayName(parsed.data);
+      displayName = entryDisplayName(
+        parsed.data.kind,
+        parsed.data.title,
+        parsed.data.organization,
+        parsed.data.sourceSection,
+      );
       sourceOffsetStart = null;
       sourceOffsetEnd = null;
     } else if (override?.headerFields !== undefined) {

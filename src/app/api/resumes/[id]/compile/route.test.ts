@@ -3,9 +3,11 @@ import { ownerScopedTable } from "@/lib/db";
 import { setResumeComposition } from "@/lib/composition";
 
 // Route handlers now resolve ownerId from a real Supabase Auth session
-// (src/lib/owner.ts), which isn't available in this test environment —
-// stand in with the same fixed test owner id the live-DB fixtures below use.
-const testOwnerId = process.env.MODULAR_OWNER_ID!;
+// (src/lib/owner.ts), which isn't available in this test environment. These
+// tests hit the live Supabase project directly (owner_id has an auth.users
+// FK, see 0007_auth_owner_fk.sql), so TEST_OWNER_ID must be a real signed-in
+// user's id, not an arbitrary UUID — set it in .env to run this file.
+const testOwnerId = process.env.TEST_OWNER_ID!;
 vi.mock("@/lib/owner", () => ({ getOwnerId: async () => testOwnerId }));
 
 const compileLatexInSandbox = vi.fn();
