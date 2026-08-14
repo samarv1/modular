@@ -6,7 +6,7 @@ import { assembleJakeResume } from "./assemble";
 import type { ResumeComposition } from "../types";
 
 const fixture = readFileSync(
-  join(__dirname, "../../../../fixtures/jakes-resume/resume.tex"),
+  join(__dirname, "../../../fixtures/jakes-resume/resume.tex"),
   "utf8",
 );
 

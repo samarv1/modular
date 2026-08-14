@@ -1,5 +1,5 @@
 // The fixed preamble (everything before \begin{document}) from Jake's Resume
-// (fixtures/jakes-resume/resume.tex), used verbatim as the shell for every
+// (src/fixtures/jakes-resume/resume.tex), used verbatim as the shell for every
 // PDF/markdown-derived import. Its \newcommand declarations are exactly what
 // checkJakeContract (./fingerprint.ts) checks, so synthesized documents using
 // this preamble are recognized by the real adapter, not a special-cased one.

@@ -39,7 +39,7 @@ const { uploadArchive } = await import("@/lib/storage");
 const { extractResumeStructure } = await import("@/lib/resume-extraction");
 
 const fixture = readFileSync(
-  join(__dirname, "../../../../fixtures/jakes-resume/resume.tex"),
+  join(__dirname, "../../../fixtures/jakes-resume/resume.tex"),
   "utf8",
 );
 

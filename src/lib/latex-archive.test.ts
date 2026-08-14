@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ArchiveRejectedError, parseLatexArchive } from "./latex-archive";
 import { MAX_ARCHIVE_FILES, MAX_LATEX_SOURCE_CHARS } from "./archive-limits";
 
-const fixture = readFileSync(join(__dirname, "../../fixtures/jakes-resume/resume.tex"), "utf8");
+const fixture = readFileSync(join(__dirname, "../fixtures/jakes-resume/resume.tex"), "utf8");
 
 async function zipOf(files: Record<string, string>) {
   const zip = new JSZip();

@@ -5,7 +5,7 @@ import { extractJakeResume } from "./extract";
 import { checkJakeContract } from "./fingerprint";
 
 const fixture = readFileSync(
-  join(__dirname, "../../../../fixtures/jakes-resume/resume.tex"),
+  join(__dirname, "../../../fixtures/jakes-resume/resume.tex"),
   "utf8",
 );
 
