@@ -16,7 +16,7 @@ Tailoring a resume per application usually means duplicating a file and hand-edi
 
 **Compose.** A resume is built by dragging bank entries into sections, in a three-pane editor: the searchable bank on one side, the resume outline in the middle, a live compiled preview on the other side. Entries can be reordered, moved between sections, or pulled in from any past import, not just the one that originally contributed them.
 
-**Compile.** Every resume has one designated template shell, whose LaTeX preamble is the base. Compilation itself runs in an ephemeral Vercel Sandbox booted from a pre-built TeX Live snapshot, running `pdflatex` twice to resolve cross-references before returning the compiled PDF.
+**Compile.** Every resume has one designated template shell, whose LaTeX preamble is the base. Compilation itself runs in a Vercel Sandbox booted from a pre-built TeX Live snapshot, running `pdflatex` twice to resolve cross-references before returning the compiled PDF.
 
 **Export.** A finished one-page resume exports as either the compiled PDF or a full LaTeX ZIP, rebuilt from the original template's assets.
 
@@ -24,9 +24,9 @@ Tailoring a resume per application usually means duplicating a file and hand-edi
 
 - **Framework:** Next.js, React, TypeScript
 - **Styling:** Tailwind CSS, shadcn/ui, dnd-kit (drag-and-drop)
-- **Database & auth:** Supabase (Postgres, Google SSO via Supabase Auth, Storage)
-- **AI extraction:** Google Gemini, called directly with a Google AI Studio API key (not the Vercel AI Gateway)
-- **Document processing:** [markitdown](https://github.com/microsoft/markitdown) (PDF to markdown, Python function) and Vercel Sandbox + TeX Live (LaTeX compilation)
+- **Database & auth:** Supabase (Postgres, Google SSO, Storage)
+- **AI extraction:** Google Gemini
+- **Document processing:** [markitdown](https://github.com/microsoft/markitdown) (PDF to markdown Python function) and Vercel Sandbox + TeX Live (LaTeX compilation)
 
 ## Project structure
 
@@ -44,4 +44,4 @@ Tailoring a resume per application usually means duplicating a file and hand-edi
 
 ## Attribution
 
-Modular's LaTeX adapter targets the [Jake's Resume](https://github.com/jakegut/resume) template family, itself based on [sb2nov/resume](https://github.com/sb2nov/resume). Every resume, regardless of its original format, ultimately compiles through this template.
+Modular's LaTeX adapter targets the [Jake's Resume](https://github.com/jakegut/resume) template family. Every resume, regardless of its original format, ultimately compiles through this template.
