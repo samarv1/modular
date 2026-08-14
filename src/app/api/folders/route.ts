@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
-import { dedupedName } from "@/lib/deduped-name";
+import { dedupedName } from "@/lib/unique-db-name";
 import { readJsonObject } from "@/lib/api-request";
 import { integerFieldError } from "@/lib/field-validation";
 import type { ResumeFolderRow } from "@/lib/rows";

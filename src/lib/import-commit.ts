@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { asRow, asRows, ownerScopedTable } from "@/lib/db";
-import { dedupedName } from "@/lib/deduped-name";
+import { dedupedName } from "@/lib/unique-db-name";
 import { uploadArchive, deleteArchive } from "@/lib/storage";
 import type { ExtractedResume } from "@/lib/adapters/types";
 import { renderEntry, renderHeader } from "@/lib/synthesize-jake-latex";

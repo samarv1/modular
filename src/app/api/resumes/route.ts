@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { asRow, asRows, ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
 import { CompositionError, compositionErrorStatus, setResumeComposition } from "@/lib/composition";
-import { dedupedName } from "@/lib/deduped-name";
+import { dedupedName } from "@/lib/unique-db-name";
 import { readJsonObject } from "@/lib/api-request";
 import { integerFieldError, nullableStringFieldError } from "@/lib/field-validation";
 import type { ResumeRow } from "@/lib/rows";

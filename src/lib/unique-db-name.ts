@@ -1,6 +1,6 @@
 import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
-import { dedupeName } from "@/lib/dedupe-name";
+import { dedupeName } from "@/lib/finder-style-name";
 
 /**
  * Picks a Finder-style unique name for a new or renamed row by comparing

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
-import { dedupedName } from "@/lib/deduped-name";
+import { dedupedName } from "@/lib/unique-db-name";
 import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
 import { integerFieldError } from "@/lib/field-validation";
 import { deleteOwnedRow } from "@/lib/delete-owned-row";

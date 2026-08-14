@@ -1,0 +1,8 @@
+.next/**
+out/**
+build/**
+next-env.d.ts
+supabase/.temp/**
+supabase/.branches/**
+src/fixtures/**
+package-lock.json

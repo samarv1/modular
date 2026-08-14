@@ -1,0 +1,3 @@
+npm run format:check || echo "warning: formatting issues found, run 'npm run format' to fix"
+npm run lint || echo "warning: lint issues found"
+exit 0
