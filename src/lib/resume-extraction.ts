@@ -1,6 +1,9 @@
 import { generateText, APICallError, RetryError } from "ai";
 import { google } from "@ai-sdk/google";
-import { ResumeExtractionSchema, type ResumeExtraction } from "./resume-extraction-schema";
+import {
+  ResumeExtractionSchema,
+  type ResumeExtraction,
+} from "./resume-extraction-schema";
 
 // Direct Google provider rather than the Vercel AI Gateway: the Gateway
 // requires a card on file on the Vercel team before it'll serve any model
@@ -53,10 +56,15 @@ Rules:
 export class ResumeExtractionError extends Error {}
 
 function stripCodeFences(text: string): string {
-  return text.trim().replace(/^```(?:json)?\n?/, "").replace(/```$/, "");
+  return text
+    .trim()
+    .replace(/^```(?:json)?\n?/, "")
+    .replace(/```$/, "");
 }
 
-export async function extractResumeStructure(markdown: string): Promise<ResumeExtraction> {
+export async function extractResumeStructure(
+  markdown: string,
+): Promise<ResumeExtraction> {
   // generateText's own retry loop still throws on a persistent failure (e.g.
   // the free-tier daily quota running out) — that arrives as an AI SDK error,
   // not a ResumeExtractionError, so every caller's `catch (ResumeExtractionError)`
@@ -74,10 +82,12 @@ export async function extractResumeStructure(markdown: string): Promise<ResumeEx
     // attempt in .errors), not as a bare APICallError, so both shapes need
     // checking.
     const causes = RetryError.isInstance(err) ? err.errors : [err];
-    const rateLimited = causes.some((c) => APICallError.isInstance(c) && c.statusCode === 429);
+    const rateLimited = causes.some(
+      (c) => APICallError.isInstance(c) && c.statusCode === 429,
+    );
     throw new ResumeExtractionError(
       rateLimited
-        ? "the AI extraction service is rate-limited right now, try again in a minute"
+        ? "the AI extraction service is rate-limited right now, try again later"
         : "the AI extraction service failed to respond",
     );
   }
