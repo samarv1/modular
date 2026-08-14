@@ -70,17 +70,16 @@ export function renderEntry(entry: ExtractedEntry): string {
       renderBullets(entry.bullets ?? [])
     );
   }
-  // section_chunk: not itself a \resumeSubheading-family entry, so it can't
-  // sit inside a resumeSubHeadingList — the caller renders its section body
-  // separately (see renderSectionBody).
-  throw new Error("section_chunk entries must be rendered via renderSectionBody");
+  return renderSectionChunk(entry);
 }
 
 // The common "Category: value, value" idiom (e.g. Technical Skills) — split
 // once here, on the model/serializer boundary, rather than carrying a
 // {label, value} shape through the LLM schema (see resume-extraction-schema.ts
-// on why that schema stays flat).
-function renderSectionChunkBody(entry: ExtractedEntry): string {
+// on why that schema stays flat). Exported so a single edited section_chunk
+// entry can be regenerated on its own (via renderEntry) as well as inline
+// as part of a whole-section body (renderSectionBody, different wrapping).
+export function renderSectionChunk(entry: ExtractedEntry): string {
   const lines = (entry.items ?? [])
     .map((line) => {
       const colonIndex = line.indexOf(":");
@@ -95,7 +94,7 @@ function renderSectionChunkBody(entry: ExtractedEntry): string {
 
 function renderSectionBody(entries: ExtractedEntry[]): string {
   if (entries.length === 1 && entries[0].kind === "section_chunk") {
-    return renderSectionChunkBody(entries[0]);
+    return renderSectionChunk(entries[0]);
   }
   const rendered = entries.map(renderEntry).join("\n\n");
   return `  \\resumeSubHeadingListStart\n${rendered}\n  \\resumeSubHeadingListEnd`;

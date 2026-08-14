@@ -97,7 +97,15 @@ export async function POST(request: Request) {
   }
 
   const overrides = parseOverrides(form.get("overrides"));
-  const finalEntries = applyOverrides(flatEntries, overrides);
+  let finalEntries;
+  try {
+    finalEntries = applyOverrides(flatEntries, overrides);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "invalid overrides" },
+      { status: 400 },
+    );
+  }
   if (finalEntries.length === 0) {
     return NextResponse.json(
       { error: "no reusable resume entries were found" },

@@ -89,13 +89,18 @@ export const UploadZone = forwardRef<
       }`}
     >
       <Upload className="size-3.5 shrink-0" />
-      <span>Drop a resume ZIP or PDF, or</span>
-      <button
-        onClick={() => inputRef.current?.click()}
-        className="font-mono text-[10.5px] uppercase tracking-wide text-brand hover:underline"
-      >
-        browse
-      </button>
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center gap-2">
+          <span>Drop a resume ZIP or PDF, or</span>
+          <button
+            onClick={() => inputRef.current?.click()}
+            className="font-mono text-[10.5px] uppercase tracking-wide text-brand hover:underline"
+          >
+            browse
+          </button>
+        </div>
+        <span className="text-[10.5px] text-muted-fg">ZIP imports faster and keeps your exact formatting</span>
+      </div>
       {input}
     </div>
   );

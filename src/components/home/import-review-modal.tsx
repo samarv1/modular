@@ -11,7 +11,9 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { sectionGroupLabel } from "@/lib/section-label";
-import { parseJakeEntryPreview } from "@/lib/jake-entry-preview";
+import { EntryEditor, HeaderFieldsEditor } from "@/components/bank/entry-editor";
+import { bankEntryToExtractedEntry, bankEntryToHeaderData } from "@/lib/bank-entry-fields";
+import type { ExtractedEntry } from "@/lib/resume-extraction-schema";
 import type { BankEntryRow } from "@/lib/rows";
 import { UploadZone } from "@/components/home/upload-zone";
 import { PdfImportBody } from "@/components/home/pdf-import-review-modal";
@@ -27,15 +29,6 @@ interface PreviewEntry {
   displayName: string;
   rawLatex: string;
   isDuplicate: boolean;
-}
-
-interface EntryEdit {
-  displayName?: string;
-  excluded?: boolean;
-  // Set when the user explicitly re-includes an entry that was auto-excluded
-  // for being a duplicate. Tells the commit route to skip its own
-  // exact-duplicate filter for this one instead of silently dropping it.
-  includeDuplicate?: boolean;
 }
 
 type Phase = "idle" | "loading" | "mismatch" | "review" | "committing" | "pdf";
@@ -69,7 +62,13 @@ export function ImportReviewModal({
     null,
   );
   const [entries, setEntries] = useState<PreviewEntry[]>([]);
-  const [edits, setEdits] = useState<Record<string, EntryEdit>>({});
+  const [removedIndices, setRemovedIndices] = useState<Set<number>>(new Set());
+  const [entryDrafts, setEntryDrafts] = useState<Record<string, ExtractedEntry>>({});
+  const [initialDrafts, setInitialDrafts] = useState<Record<string, ExtractedEntry>>({});
+  const [headerDraft, setHeaderDraft] = useState<{ name: string; contactLine: string } | null>(null);
+  const [initialHeaderDraft, setInitialHeaderDraft] = useState<{ name: string; contactLine: string } | null>(
+    null,
+  );
 
   function reset() {
     setPhase("idle");
@@ -78,7 +77,11 @@ export function ImportReviewModal({
     setErrorMessage(null);
     setMismatchReport(null);
     setEntries([]);
-    setEdits({});
+    setRemovedIndices(new Set());
+    setEntryDrafts({});
+    setInitialDrafts({});
+    setHeaderDraft(null);
+    setInitialHeaderDraft(null);
   }
 
   // The shared UploadZone accepts both a LaTeX export (.zip) and a plain PDF
@@ -109,13 +112,33 @@ export function ImportReviewModal({
       const res = await fetch("/api/imports", { method: "POST", body: form });
       const body = await res.json().catch(() => null);
       if (res.ok && body?.compatible) {
-        setEntries(
-          (body.entries as (Omit<PreviewEntry, "key"> & { index: number })[]).map((entry) => ({
-            ...entry,
-            key: String(entry.index),
-          })),
+        const loaded: PreviewEntry[] = (
+          body.entries as (Omit<PreviewEntry, "key"> & { index: number })[]
+        ).map((entry) => ({ ...entry, key: String(entry.index) }));
+        setEntries(loaded);
+        setRemovedIndices(new Set());
+
+        const header = loaded.find((e) => e.kind === "header_chunk") ?? null;
+        const header0 = header ? bankEntryToHeaderData({ raw_latex: header.rawLatex }) : null;
+        setHeaderDraft(header0);
+        setInitialHeaderDraft(header0);
+
+        const drafts = Object.fromEntries(
+          loaded
+            .filter((e) => e.kind !== "header_chunk")
+            .map((e) => [
+              e.key,
+              bankEntryToExtractedEntry({
+                kind: e.kind,
+                source_section: e.sourceSection,
+                raw_latex: e.rawLatex,
+                display_name: e.displayName,
+              }),
+            ]),
         );
-        setEdits({});
+        setEntryDrafts(drafts);
+        setInitialDrafts(drafts);
+
         setPhase("review");
         return;
       }
@@ -132,27 +155,34 @@ export function ImportReviewModal({
     }
   }
 
-  function updateEdit(key: string, patch: EntryEdit) {
-    setEdits((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  // Matches PdfImportBody's removeEntry: takes the entry out of the review
+  // screen entirely (no reversible exclude toggle). The backend's own
+  // exact-duplicate check in commitImport runs unconditionally regardless
+  // of what's removed here, so a true duplicate is still silently skipped
+  // even if left in.
+  function removeEntry(entry: PreviewEntry) {
+    setRemovedIndices((prev) => new Set(prev).add(entry.index));
   }
 
-  // Duplicates default to excluded unless the user explicitly opts back in
-  // (see PreviewEntryRow): an entry with no edit yet falls back to its
-  // isDuplicate flag rather than always-included.
-  function isExcluded(entry: PreviewEntry): boolean {
-    return edits[entry.key]?.excluded ?? entry.isDuplicate;
+  function updateEntryDraft(key: string, patch: Partial<ExtractedEntry>) {
+    setEntryDrafts((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } as ExtractedEntry }));
   }
 
-  const includedCount = entries.filter((e) => !isExcluded(e)).length;
-  const duplicateCount = entries.filter((e) => e.isDuplicate).length;
+  const visibleEntries = entries.filter((e) => !removedIndices.has(e.index));
+  // The header entry is always committed (edited via HeaderFieldsEditor
+  // above the sections, no Remove button), so it's left out of these counts,
+  // otherwise "Approve (N)" and the summary line's entry count would
+  // include something not listed in any section.
+  const nonHeaderEntries = visibleEntries.filter((e) => e.kind !== "header_chunk");
 
-  // Grouped by section, in first-appearance order. Mirrors the bank pane's
-  // own grouping so the review screen reads like a preview of where things
-  // will land.
+  // Grouped by section, in first-appearance order, header entry excluded
+  // (rendered separately via HeaderFieldsEditor, same as EditSourceResumeBody
+  // and PdfImportBody). Mirrors the bank pane's own grouping so the review
+  // screen reads like a preview of where things will land.
   const groups = useMemo(() => {
     const order: string[] = [];
     const byLabel = new Map<string, PreviewEntry[]>();
-    for (const entry of entries) {
+    for (const entry of nonHeaderEntries) {
       if (!byLabel.has(entry.sourceSection)) {
         order.push(entry.sourceSection);
         byLabel.set(entry.sourceSection, []);
@@ -160,17 +190,32 @@ export function ImportReviewModal({
       byLabel.get(entry.sourceSection)!.push(entry);
     }
     return order.map((label): [string, PreviewEntry[]] => [label, byLabel.get(label)!]);
-  }, [entries]);
+  }, [nonHeaderEntries]);
 
   async function commitImport() {
     if (!file) return;
     setPhase("committing");
     setErrorMessage(null);
-    const overrides = Object.entries(edits)
-      .map(([key, patch]) => ({ index: Number(key), ...patch }))
-      .filter(
-        (o) => o.displayName !== undefined || o.excluded !== undefined || o.includeDuplicate !== undefined,
-      );
+    const overrides = entries
+      .map((entry) => {
+        const patch: Record<string, unknown> = { index: entry.index };
+        let touched = false;
+        if (removedIndices.has(entry.index)) {
+          patch.excluded = true;
+          touched = true;
+        }
+        if (entry.kind === "header_chunk") {
+          if (headerDraft && JSON.stringify(headerDraft) !== JSON.stringify(initialHeaderDraft)) {
+            patch.headerFields = headerDraft;
+            touched = true;
+          }
+        } else if (JSON.stringify(entryDrafts[entry.key]) !== JSON.stringify(initialDrafts[entry.key])) {
+          patch.entryFields = entryDrafts[entry.key];
+          touched = true;
+        }
+        return touched ? patch : null;
+      })
+      .filter((o): o is Record<string, unknown> => o !== null);
     try {
       const form = new FormData();
       form.set("file", file);
@@ -268,9 +313,7 @@ export function ImportReviewModal({
             {(phase === "review" || phase === "committing") && (
               <>
                 <div className="text-[11.5px] text-faint">
-                  {`Found ${groups.length} section${groups.length === 1 ? "" : "s"}, ${entries.length} entr${entries.length === 1 ? "y" : "ies"}.`}
-                  {duplicateCount > 0 && ` ${duplicateCount} already in your bank.`}
-                  {" View simplified previews."}
+                  {`Found ${groups.length} section${groups.length === 1 ? "" : "s"}, ${nonHeaderEntries.length} entr${nonHeaderEntries.length === 1 ? "y" : "ies"}. Review and edit before uploading.`}
                 </div>
 
                 {/* Bounded + self-scrolling, independent of the dialog's own
@@ -285,17 +328,23 @@ export function ImportReviewModal({
                     it doesn't reflow row content when it appears mid-scroll
                     (the actual cause of the flicker). */}
                 <div className="flex max-h-[45vh] flex-col gap-4 overflow-y-auto pr-1 [scrollbar-gutter:stable]">
+                  {headerDraft && (
+                    <HeaderFieldsEditor
+                      header={headerDraft}
+                      onChange={(patch) => setHeaderDraft({ ...headerDraft, ...patch })}
+                    />
+                  )}
                   {groups.map(([label, groupEntries]) => (
                     <div key={label} className="flex flex-col gap-2">
                       <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-fg">
                         {sectionGroupLabel(label)}
                       </div>
                       {groupEntries.map((entry) => (
-                        <PreviewEntryRow
+                        <EntryEditor
                           key={entry.key}
-                          entry={entry}
-                          edit={edits[entry.key]}
-                          onEdit={(patch) => updateEdit(entry.key, patch)}
+                          entry={entryDrafts[entry.key]}
+                          onChange={(patch) => updateEntryDraft(entry.key, patch)}
+                          onRemove={() => removeEntry(entry)}
                         />
                       ))}
                     </div>
@@ -308,11 +357,14 @@ export function ImportReviewModal({
                   <Button variant="outline" onClick={close} disabled={phase === "committing"}>
                     Cancel
                   </Button>
-                  <Button onClick={commitImport} disabled={phase === "committing" || includedCount === 0}>
+                  <Button
+                    onClick={commitImport}
+                    disabled={phase === "committing" || nonHeaderEntries.length === 0}
+                  >
                     {phase === "committing" ? (
                       <Loader2 className="size-3.5 animate-spin" />
                     ) : (
-                      `Approve (${includedCount})`
+                      `Approve (${nonHeaderEntries.length})`
                     )}
                   </Button>
                 </DialogFooter>
@@ -325,95 +377,3 @@ export function ImportReviewModal({
   );
 }
 
-function PreviewEntryRow({
-  entry,
-  edit,
-  onEdit,
-}: {
-  entry: PreviewEntry;
-  edit: EntryEdit | undefined;
-  onEdit: (patch: EntryEdit) => void;
-}) {
-  const [showPreview, setShowPreview] = useState(false);
-  // Duplicates start excluded. The user can still click Include to bring
-  // one in anyway (see route.ts's includeDuplicate override).
-  const excluded = edit?.excluded ?? entry.isDuplicate;
-  const displayName = edit?.displayName ?? entry.displayName;
-  const preview = useMemo(
-    () => parseJakeEntryPreview(entry.kind, entry.rawLatex),
-    [entry.kind, entry.rawLatex],
-  );
-
-  return (
-    <div
-      className={`flex flex-col gap-1.5 rounded-md border border-line-strong p-2.5 ${excluded ? "opacity-50" : ""}`}
-    >
-      <div className="flex items-start gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <input
-            value={displayName}
-            onChange={(e) => onEdit({ displayName: e.target.value })}
-            disabled={excluded}
-            className="min-w-0 border-b border-line-strong bg-transparent text-[12.5px] font-semibold outline-none focus:border-brand disabled:cursor-not-allowed"
-          />
-          {entry.isDuplicate && <span className="text-[10.5px] text-danger">Already in your bank.</span>}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setShowPreview((v) => !v)}
-            className="rounded-sm px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-fg hover:bg-surface-sunken hover:text-brand"
-          >
-            {showPreview ? "Hide" : "View"}
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              onEdit({
-                excluded: !excluded,
-                ...(entry.isDuplicate ? { includeDuplicate: true } : {}),
-              })
-            }
-            className={`rounded-sm px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide ${
-              excluded
-                ? "text-brand hover:bg-surface-sunken"
-                : "text-muted-fg hover:bg-danger/10 hover:text-danger"
-            }`}
-          >
-            {excluded ? "Include" : "Exclude"}
-          </button>
-        </div>
-      </div>
-      {showPreview && (
-        // Same rendered "what does this look like" preview as the bank
-        // pane's entry dialog (src/lib/jake-entry-preview.ts): a light,
-        // non-authoritative read of the macros, not a real LaTeX compile,
-        // so exact layout (centering, hyperlink styling, the real `|`
-        // separator) won't match (see the summary line's caption above).
-        <div className="rounded-sm border border-line-strong bg-white p-4 font-latex text-[13px] text-[#111] shadow-[0_1px_0_var(--line-strong)]">
-          {preview.title && (
-            <div className="flex items-baseline justify-between gap-3">
-              <div className="text-[14px] font-bold">{preview.title}</div>
-              {preview.subtitle && <div className="shrink-0 text-[12px]">{preview.subtitle}</div>}
-            </div>
-          )}
-          {(preview.meta || preview.location) && (
-            <div
-              className={`mt-0.5 flex items-baseline justify-between gap-3 text-[12px] ${entry.kind === "header_chunk" ? "" : "italic"}`}
-            >
-              <span>{preview.meta}</span>
-              <span className="shrink-0">{preview.location}</span>
-            </div>
-          )}
-          {preview.bullets.length > 0 && (
-            <ul className="mt-2 list-disc space-y-1 pl-4 text-[12px] not-italic">
-              {preview.bullets.map((bullet, i) => (
-                <li key={i}>{bullet}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}

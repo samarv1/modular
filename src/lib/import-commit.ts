@@ -3,6 +3,12 @@ import { asRow, asRows, ownerScopedTable } from "@/lib/db";
 import { dedupedName } from "@/lib/deduped-name";
 import { uploadArchive, deleteArchive } from "@/lib/storage";
 import type { ExtractedResume } from "@/lib/adapters/types";
+import { renderEntry, renderHeader } from "@/lib/synthesize-jake-latex";
+import {
+  ExtractedEntrySchema,
+  HeaderDataSchema,
+  type ExtractedEntry as ExtractedEntryFields,
+} from "@/lib/resume-extraction-schema";
 
 // Shared by both import entry points (POST /api/imports for real .zip
 // uploads, POST /api/pdf-imports for synthesized-from-PDF ones): everything
@@ -56,7 +62,26 @@ export type EntryOverride = {
   // explicitly opted back in, so the exact-duplicate filter further down
   // must not silently drop it again.
   includeDuplicate?: boolean;
+  // Structured field edits for a touched entry, keyed by kind (mirrors
+  // PATCH /api/entries/:id's entry/header mutual exclusivity). Validated
+  // against ExtractedEntrySchema/HeaderDataSchema in applyOverrides, so an
+  // entry the user never touched in the review UI has neither set, and
+  // keeps its original byte-for-byte rawLatex.
+  entryFields?: unknown;
+  headerFields?: unknown;
 };
+
+// Mirrors extract.ts's entryDisplayName/extractSectionEntries exactly (same
+// per-kind fields, same "title, organization" join for subheading_entry, same
+// section-title fallback for section_chunk), so an edited entry's bank label
+// uses the identical convention an untouched one already got at parse time.
+function deriveDisplayName(entry: ExtractedEntryFields): string {
+  if (entry.kind === "project_entry") return entry.title ?? "";
+  if (entry.kind === "subheading_entry") {
+    return [entry.title, entry.organization].filter(Boolean).join(" — ");
+  }
+  return entry.sourceSection;
+}
 
 export function parseOverrides(raw: unknown): EntryOverride[] {
   let parsed: unknown = raw;
@@ -73,18 +98,64 @@ export function parseOverrides(raw: unknown): EntryOverride[] {
   );
 }
 
+// Regenerates a touched entry's rawLatex from user-edited structured fields
+// (same renderEntry/renderHeader path PATCH /api/entries/:id uses for an
+// existing bank entry), server-side, so the client never has to be trusted
+// with raw LaTeX text directly. Throws on an invalid or incomplete
+// entryFields/headerFields payload (same required-fields check as
+// /api/pdf-imports's commit path, since this now accepts the same
+// structured shape from the same editor) so the caller fails the whole
+// commit instead of silently keeping the entry's stale, pre-edit rawLatex.
 export function applyOverrides(entries: FlatEntry[], overrides: EntryOverride[]): FlatEntry[] {
   const byIndex = new Map(overrides.map((o) => [o.index, o]));
   const result: FlatEntry[] = [];
   for (const entry of entries) {
     const override = byIndex.get(entry.index);
     if (override?.excluded) continue;
+
+    let rawLatex = entry.rawLatex;
+    let displayName = entry.displayName;
+    let sourceOffsetStart = entry.sourceOffsetStart;
+    let sourceOffsetEnd = entry.sourceOffsetEnd;
+
+    if (override?.entryFields !== undefined) {
+      const parsed = ExtractedEntrySchema.safeParse(override.entryFields);
+      if (!parsed.success) throw new Error(`invalid fields for entry ${entry.index}`);
+      // ExtractedEntrySchema leaves title/items optional (see
+      // resume-extraction-schema.ts), so an edit that clears the one field
+      // its kind actually needs has to be caught here too, same as
+      // /api/pdf-imports's commit path, otherwise it'd silently synthesize
+      // e.g. `\resumeSubheading{}{}{}{}` with an empty display name.
+      const missingRequired =
+        parsed.data.kind === "section_chunk"
+          ? !parsed.data.items || parsed.data.items.length === 0
+          : !parsed.data.title;
+      if (missingRequired) {
+        throw new Error(
+          `"${parsed.data.sourceSection}" entry missing ${parsed.data.kind === "section_chunk" ? "items" : "a title"}`,
+        );
+      }
+      rawLatex = renderEntry(parsed.data);
+      displayName = deriveDisplayName(parsed.data);
+      sourceOffsetStart = null;
+      sourceOffsetEnd = null;
+    } else if (override?.headerFields !== undefined) {
+      const parsed = HeaderDataSchema.safeParse(override.headerFields);
+      if (!parsed.success) throw new Error(`invalid header fields for entry ${entry.index}`);
+      rawLatex = renderHeader(parsed.data);
+      sourceOffsetStart = null;
+      sourceOffsetEnd = null;
+    }
+
     result.push({
       ...entry,
+      rawLatex,
+      sourceOffsetStart,
+      sourceOffsetEnd,
       displayName:
         typeof override?.displayName === "string" && override.displayName.trim()
           ? override.displayName.trim()
-          : entry.displayName,
+          : displayName,
     });
   }
   return result;

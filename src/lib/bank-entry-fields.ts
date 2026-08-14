@@ -1,4 +1,5 @@
 import {
+  cleanLatexText,
   extractItems,
   parseHeaderChunkPreview,
   parseProjectTitle,
@@ -6,8 +7,18 @@ import {
   readBalancedArgs,
 } from "@/lib/jake-entry-preview";
 import { HeaderDataSchema, type ExtractedEntry } from "@/lib/resume-extraction-schema";
-import type { BankEntryRow } from "@/lib/rows";
 import type { z } from "zod";
+
+// Narrower than BankEntryRow (only the fields these converters actually
+// read), so a ZIP-preview PreviewEntry (import-review-modal.tsx) can be
+// adapted into this shape too, reusing the same raw_latex -> structured
+// -fields conversion as the edit-existing-resume screen.
+type RawEntrySource = {
+  kind: string;
+  source_section: string;
+  raw_latex: string;
+  display_name: string;
+};
 
 // Reverse of renderEntry/renderHeader (synthesize-jake-latex.ts): turns an
 // existing bank_entry's immutable raw_latex back into the same structured
@@ -17,7 +28,7 @@ import type { z } from "zod";
 // handled — anything else falls back to an empty, title-only shell rather
 // than throwing, since a malformed/legacy entry should still open for
 // editing.
-export function bankEntryToExtractedEntry(entry: BankEntryRow): ExtractedEntry {
+export function bankEntryToExtractedEntry(entry: RawEntrySource): ExtractedEntry {
   const { kind, source_section: sourceSection, raw_latex: rawLatex } = entry;
 
   if (kind === "subheading_entry") {
@@ -30,10 +41,10 @@ export function bankEntryToExtractedEntry(entry: BankEntryRow): ExtractedEntry {
     return {
       kind,
       sourceSection,
-      title,
-      date,
-      organization,
-      location,
+      title: cleanLatexText(title),
+      date: cleanLatexText(date),
+      organization: cleanLatexText(organization),
+      location: cleanLatexText(location),
       bullets: extractItems(rawLatex),
     };
   }
@@ -46,7 +57,7 @@ export function bankEntryToExtractedEntry(entry: BankEntryRow): ExtractedEntry {
       2,
     );
     const { title, meta: stack } = parseProjectTitle(titleLine);
-    return { kind, sourceSection, title, date, stack, bullets: extractItems(rawLatex) };
+    return { kind, sourceSection, title, date: cleanLatexText(date), stack, bullets: extractItems(rawLatex) };
   }
 
   if (kind === "section_chunk") {
@@ -56,7 +67,9 @@ export function bankEntryToExtractedEntry(entry: BankEntryRow): ExtractedEntry {
   return { kind: "section_chunk", sourceSection, items: [] };
 }
 
-export function bankEntryToHeaderData(entry: BankEntryRow): z.infer<typeof HeaderDataSchema> {
+export function bankEntryToHeaderData(
+  entry: Pick<RawEntrySource, "raw_latex">,
+): z.infer<typeof HeaderDataSchema> {
   const preview = parseHeaderChunkPreview(entry.raw_latex);
   return { name: preview.title, contactLine: preview.meta ?? "" };
 }
