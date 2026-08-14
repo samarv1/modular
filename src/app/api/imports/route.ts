@@ -1,4 +1,3 @@
-import JSZip from "jszip";
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
@@ -6,7 +5,7 @@ import { detectAdapter } from "@/lib/adapters/registry";
 import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
 import { extractResumeStructure, ResumeExtractionError } from "@/lib/resume-extraction";
-import { synthesizeJakeLatex } from "@/lib/synthesize-jake-latex";
+import { synthesizeJakeArchive } from "@/lib/synthesize-jake-archive";
 import {
   applyOverrides,
   commitImport,
@@ -14,8 +13,6 @@ import {
   normalizeLatex,
   parseOverrides,
 } from "@/lib/import-commit";
-
-const SYNTHETIC_ROOT_FILE = "resume.tex";
 
 export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
@@ -157,21 +154,15 @@ async function tryConvertViaAi(latexSource: string) {
     throw err;
   }
 
-  const source = synthesizeJakeLatex(extraction);
-  const zip = new JSZip();
-  zip.file(SYNTHETIC_ROOT_FILE, source);
-  const zipBytes = await zip.generateAsync({ type: "uint8array" });
-
   // Backstop, not expected to fail: the canonical preamble always satisfies
   // the contract, so this only trips if the serializer produced something
   // structurally broken.
-  let archive;
+  let zipBytes, archive, adapter, result;
   try {
-    archive = await parseLatexArchive(zipBytes);
+    ({ zipBytes, archive, adapter, result } = await synthesizeJakeArchive(extraction));
   } catch {
     return null;
   }
-  const { adapter, result } = detectAdapter({ rootFile: archive.rootFile, source: archive.source });
   if (!adapter || !result.compatible) return null;
 
   return { zipBytes, archive, adapter, result };

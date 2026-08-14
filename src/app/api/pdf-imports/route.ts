@@ -1,16 +1,13 @@
-import JSZip from "jszip";
 import { NextResponse } from "next/server";
 import { getOwnerId } from "@/lib/owner";
 import { convertPdfToMarkdown, PdfToMarkdownError } from "@/lib/pdf-to-markdown";
 import { extractResumeStructure, ResumeExtractionError } from "@/lib/resume-extraction";
 import { ResumeExtractionSchema } from "@/lib/resume-extraction-schema";
-import { synthesizeJakeLatex } from "@/lib/synthesize-jake-latex";
-import { parseLatexArchive, ArchiveRejectedError } from "@/lib/latex-archive";
-import { detectAdapter } from "@/lib/adapters/registry";
+import { synthesizeJakeArchive } from "@/lib/synthesize-jake-archive";
+import { ArchiveRejectedError } from "@/lib/latex-archive";
 import { commitImport, flattenEntries } from "@/lib/import-commit";
 
 const MAX_PDF_BYTES = 25 * 1024 * 1024;
-const SYNTHETIC_ROOT_FILE = "resume.tex";
 
 // mode=preview: PDF -> markdown -> LLM-structured JSON, for the review modal.
 // Nothing is persisted, mirroring mode=preview in /api/imports.
@@ -102,17 +99,12 @@ export async function POST(request: Request) {
     );
   }
 
-  const source = synthesizeJakeLatex(extraction);
-  const zip = new JSZip();
-  zip.file(SYNTHETIC_ROOT_FILE, source);
-  const zipBytes = await zip.generateAsync({ type: "uint8array" });
-
   // Backstop, not expected to fail: the canonical preamble always satisfies
   // the contract, so this only trips if the serializer produced something
   // structurally broken (e.g. an unbalanced brace from a bad escape).
-  let archive;
+  let converted;
   try {
-    archive = await parseLatexArchive(zipBytes);
+    converted = await synthesizeJakeArchive(extraction);
   } catch (err) {
     if (err instanceof ArchiveRejectedError) {
       return NextResponse.json(
@@ -122,8 +114,7 @@ export async function POST(request: Request) {
     }
     throw err;
   }
-
-  const { adapter, result } = detectAdapter({ rootFile: archive.rootFile, source: archive.source });
+  const { zipBytes, archive, adapter, result } = converted;
   if (!adapter || !result.compatible) {
     return NextResponse.json(
       { error: "conversion to a resume failed: synthesized document was not recognized" },

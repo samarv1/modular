@@ -1,4 +1,4 @@
-import { generateText } from "ai";
+import { generateText, APICallError, RetryError } from "ai";
 import { google } from "@ai-sdk/google";
 import { ResumeExtractionSchema, type ResumeExtraction } from "./resume-extraction-schema";
 
@@ -57,12 +57,30 @@ function stripCodeFences(text: string): string {
 }
 
 export async function extractResumeStructure(markdown: string): Promise<ResumeExtraction> {
-  const { text } = await generateText({
-    model: MODEL,
-    system: SYSTEM_PROMPT,
-    prompt: markdown,
-    maxOutputTokens: 16000,
-  });
+  // generateText's own retry loop still throws on a persistent failure (e.g.
+  // the free-tier daily quota running out) — that arrives as an AI SDK error,
+  // not a ResumeExtractionError, so every caller's `catch (ResumeExtractionError)`
+  // would otherwise miss it and let the raw error crash the route as a 500.
+  let text: string;
+  try {
+    ({ text } = await generateText({
+      model: MODEL,
+      system: SYSTEM_PROMPT,
+      prompt: markdown,
+      maxOutputTokens: 16000,
+    }));
+  } catch (err) {
+    // A persistent 429 surfaces wrapped in a RetryError (one per retry
+    // attempt in .errors), not as a bare APICallError, so both shapes need
+    // checking.
+    const causes = RetryError.isInstance(err) ? err.errors : [err];
+    const rateLimited = causes.some((c) => APICallError.isInstance(c) && c.statusCode === 429);
+    throw new ResumeExtractionError(
+      rateLimited
+        ? "the AI extraction service is rate-limited right now, try again in a minute"
+        : "the AI extraction service failed to respond",
+    );
+  }
 
   let parsedJson: unknown;
   try {
