@@ -153,7 +153,7 @@ export function BankPane({
               <div className="mb-1.5 font-mono text-[10.5px] uppercase tracking-wide text-muted-fg">
                 No entries yet
               </div>
-              Import a resume ZIP to start extracting reusable entries.
+              Import a resume to start extracting reusable entries.
             </div>
           ) : (
             groups.map(([sectionTitle, sectionEntries]) => (

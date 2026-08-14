@@ -132,7 +132,6 @@ export function Desktop({
   const router = useRouter();
   const [folders, setFolders] = useState(initialFolders);
   const [resumes, setResumes] = useState(initialResumes);
-  const [templateShellAvailable, setTemplateShellAvailable] = useState(hasTemplateShell);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   // Finder-style selection: one item at a time, first click highlights and
@@ -189,6 +188,13 @@ export function Desktop({
   useEffect(() => {
     refreshBankFiles();
   }, [refreshBankFiles]);
+
+  // A template shell created by a past import outlives the bank resumes that
+  // created it (deleting a bank resume never deletes the shell), so "can I
+  // create a blank resume" has to track the live bank count, not just
+  // whether a shell was ever made. Falls back to the server-computed prop
+  // only until the client-side bank fetch above resolves.
+  const templateShellAvailable = bankFiles === null ? hasTemplateShell : bankFiles.length > 0;
 
   // Static pages aren't owner data, so their desktop position lives in
   // localStorage, not the DB. Seeded with a grid default here (SSR-safe —
@@ -465,16 +471,17 @@ export function Desktop({
   // inside a folder drops the new resume straight into it, not onto the
   // desktop underneath.
   async function createResume() {
-    if (!templateShellAvailable) {
-      setEditingSourceResume(null);
-      setImportModalOpen(true);
-      return;
-    }
     const containerCount =
       currentFolderId === null
         ? STATIC_PAGES.length + resumes.filter((r) => r.folder_id === null).length + folders.length
         : resumes.filter((r) => r.folder_id === currentFolderId).length;
     const pos = nextPlacement(containerCount);
+    if (!templateShellAvailable) {
+      const params = new URLSearchParams({ positionX: String(pos.x), positionY: String(pos.y) });
+      if (currentFolderId) params.set("folderId", currentFolderId);
+      router.push(`/resume/new?${params.toString()}`);
+      return;
+    }
     try {
       const res = await fetch("/api/resumes", {
         method: "POST",
@@ -563,7 +570,6 @@ export function Desktop({
         }}
         editSourceResume={editingSourceResume}
         onImported={() => {
-          setTemplateShellAvailable(true);
           refreshBankFiles();
         }}
       />

@@ -79,6 +79,26 @@ async function createBlankResume(
     return NextResponse.json({ error: "folder not found" }, { status: 422 });
   }
 
+  // A template shell outlives the bank resumes that created it (deleting a
+  // bank resume never deletes its shell), so shell existence alone isn't
+  // proof there's anything to build a blank resume from. Require at least
+  // one successfully imported bank resume, same check GET /api/source-resumes
+  // uses for the Bank pane's own empty state.
+  const { data: sourceResume, error: sourceResumeError } = asRow<{ id: string }>(
+    await ownerScopedTable("source_resume", ownerId)
+      .select("id")
+      .eq("import_status", "success")
+      .limit(1)
+      .maybeSingle(),
+  );
+  if (sourceResumeError) throw new Error(sourceResumeError.message);
+  if (!sourceResume) {
+    return NextResponse.json(
+      { error: "no bank resume available — import a resume first" },
+      { status: 422 },
+    );
+  }
+
   let shellId = templateShellId;
   if (shellId) {
     const { data: shell, error: shellError } = asRow<{ id: string }>(
