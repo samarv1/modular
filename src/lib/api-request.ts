@@ -1,7 +1,9 @@
 export type JsonObject = Record<string, unknown>;
 
 /** Parses a JSON request body and rejects null, arrays, and primitive values. */
-export async function readJsonObject(request: Request): Promise<JsonObject | null> {
+export async function readJsonObject(
+  request: Request,
+): Promise<JsonObject | null> {
   try {
     const body: unknown = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
@@ -18,7 +20,8 @@ export function mutationErrorStatus(error: { code?: string }): number {
   return 500;
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isUuid(value: string): boolean {
   return UUID_RE.test(value);

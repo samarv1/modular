@@ -7,20 +7,31 @@ import { integerFieldError } from "@/lib/field-validation";
 import { deleteOwnedRow } from "@/lib/delete-owned-row";
 
 // Rename and/or reposition — same partial-update shape as PATCH /api/entries/:id.
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const { id } = await params;
   const body = await readJsonObject(request);
   if (!body) {
-    return NextResponse.json({ error: "body must be a JSON object" }, { status: 400 });
+    return NextResponse.json(
+      { error: "body must be a JSON object" },
+      { status: 400 },
+    );
   }
 
   const values: Record<string, unknown> = {};
   if (typeof body.name === "string") {
     const desiredName = body.name.trim();
     if (!desiredName) {
-      return NextResponse.json({ error: "name cannot be empty" }, { status: 400 });
+      return NextResponse.json(
+        { error: "name cannot be empty" },
+        { status: 400 },
+      );
     }
-    values.name = await dedupedName("resume_folder", "name", desiredName, { excludeId: id });
+    values.name = await dedupedName("resume_folder", "name", desiredName, {
+      excludeId: id,
+    });
   }
   const fieldError = integerFieldError(body, ["positionX", "positionY"]);
   if (fieldError) return fieldError;
@@ -48,7 +59,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 // resume.folder_id is ON DELETE SET NULL (0003_folders.sql) — deleting a
 // folder orphans its resumes back onto the desktop, it never deletes them.
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const { id } = await params;
   return deleteOwnedRow("resume_folder", id, "folder not found");
 }

@@ -4,7 +4,10 @@ import { dedupedName } from "@/lib/unique-db-name";
 import { uploadArchive, deleteArchive } from "@/lib/storage";
 import type { ExtractedResume } from "@/lib/adapters/types";
 import { renderEntry, renderHeader } from "@/lib/synthesize-jake-latex";
-import { ExtractedEntrySchema, HeaderDataSchema } from "@/lib/resume-extraction-schema";
+import {
+  ExtractedEntrySchema,
+  HeaderDataSchema,
+} from "@/lib/resume-extraction-schema";
 import { entryDisplayName } from "@/lib/entry-display-name";
 
 // Shared by both import entry points (POST /api/imports for real .zip
@@ -79,7 +82,10 @@ export function parseOverrides(raw: unknown): EntryOverride[] {
   }
   if (!Array.isArray(parsed)) return [];
   return parsed.filter(
-    (o): o is EntryOverride => typeof o === "object" && o !== null && typeof (o as EntryOverride).index === "number",
+    (o): o is EntryOverride =>
+      typeof o === "object" &&
+      o !== null &&
+      typeof (o as EntryOverride).index === "number",
   );
 }
 
@@ -91,7 +97,10 @@ export function parseOverrides(raw: unknown): EntryOverride[] {
 // /api/pdf-imports's commit path, since this now accepts the same
 // structured shape from the same editor) so the caller fails the whole
 // commit instead of silently keeping the entry's stale, pre-edit rawLatex.
-export function applyOverrides(entries: FlatEntry[], overrides: EntryOverride[]): FlatEntry[] {
+export function applyOverrides(
+  entries: FlatEntry[],
+  overrides: EntryOverride[],
+): FlatEntry[] {
   const byIndex = new Map(overrides.map((o) => [o.index, o]));
   const result: FlatEntry[] = [];
   for (const entry of entries) {
@@ -105,7 +114,8 @@ export function applyOverrides(entries: FlatEntry[], overrides: EntryOverride[])
 
     if (override?.entryFields !== undefined) {
       const parsed = ExtractedEntrySchema.safeParse(override.entryFields);
-      if (!parsed.success) throw new Error(`invalid fields for entry ${entry.index}`);
+      if (!parsed.success)
+        throw new Error(`invalid fields for entry ${entry.index}`);
       // ExtractedEntrySchema leaves title/items optional (see
       // resume-extraction-schema.ts), so an edit that clears the one field
       // its kind actually needs has to be caught here too, same as
@@ -131,7 +141,8 @@ export function applyOverrides(entries: FlatEntry[], overrides: EntryOverride[])
       sourceOffsetEnd = null;
     } else if (override?.headerFields !== undefined) {
       const parsed = HeaderDataSchema.safeParse(override.headerFields);
-      if (!parsed.success) throw new Error(`invalid header fields for entry ${entry.index}`);
+      if (!parsed.success)
+        throw new Error(`invalid header fields for entry ${entry.index}`);
       rawLatex = renderHeader(parsed.data);
       sourceOffsetStart = null;
       sourceOffsetEnd = null;
@@ -166,17 +177,26 @@ async function cleanupFailedImport({
     await ownerScopedTable("bank_entry", ownerId)
       .delete()
       .eq("source_resume_id", sourceResumeId)
-      .then(() => undefined, () => undefined);
+      .then(
+        () => undefined,
+        () => undefined,
+      );
     await ownerScopedTable("source_resume", ownerId)
       .delete()
       .eq("id", sourceResumeId)
-      .then(() => undefined, () => undefined);
+      .then(
+        () => undefined,
+        () => undefined,
+      );
   }
   if (createdShellId) {
     await ownerScopedTable("template_shell", ownerId)
       .delete()
       .eq("id", createdShellId)
-      .then(() => undefined, () => undefined);
+      .then(
+        () => undefined,
+        () => undefined,
+      );
   }
   await deleteArchive(archivePath).catch(() => undefined);
 }
@@ -227,8 +247,15 @@ export async function commitImport({
     // First compatible upload for this fingerprint establishes the shell;
     // later ones reuse it (see PLAN.md: "first upload becomes the template shell").
     const shells = ownerScopedTable("template_shell", ownerId);
-    const { data: existingShell, error: shellLookupError } = asRow<{ id: string }>(
-      await shells.select("id").eq("adapter_id", adapterId).eq("fingerprint", fingerprint).limit(1).maybeSingle(),
+    const { data: existingShell, error: shellLookupError } = asRow<{
+      id: string;
+    }>(
+      await shells
+        .select("id")
+        .eq("adapter_id", adapterId)
+        .eq("fingerprint", fingerprint)
+        .limit(1)
+        .maybeSingle(),
     );
     if (shellLookupError) throw new Error(shellLookupError.message);
 
@@ -251,11 +278,18 @@ export async function commitImport({
       partial.createdShellId = templateShellId;
     }
 
-    const displayName = await dedupedName("source_resume", "display_name", desiredDisplayName, {
-      excludeNulls: true,
-    });
+    const displayName = await dedupedName(
+      "source_resume",
+      "display_name",
+      desiredDisplayName,
+      {
+        excludeNulls: true,
+      },
+    );
 
-    const { data: sourceResume, error: sourceResumeError } = asRow<{ id: string }>(
+    const { data: sourceResume, error: sourceResumeError } = asRow<{
+      id: string;
+    }>(
       await ownerScopedTable("source_resume", ownerId)
         .insert({
           template_shell_id: templateShellId,
@@ -269,18 +303,19 @@ export async function commitImport({
     if (sourceResumeError) throw new Error(sourceResumeError.message);
     const sourceResumeId = sourceResume!.id;
     partial.sourceResumeId = sourceResumeId;
-    for (const entryRow of entryRows) entryRow.source_resume_id = sourceResumeId;
+    for (const entryRow of entryRows)
+      entryRow.source_resume_id = sourceResumeId;
 
     // Exact-duplicate detection: an entry is a duplicate if its raw_latex
     // (normalized) matches one already in this owner's bank, or another
     // entry earlier in this same upload batch.
-    const { data: existingLatex, error: existingLatexError } = await ownerScopedTable(
-      "bank_entry",
-      ownerId,
-    ).select("raw_latex");
+    const { data: existingLatex, error: existingLatexError } =
+      await ownerScopedTable("bank_entry", ownerId).select("raw_latex");
     if (existingLatexError) throw new Error(existingLatexError.message);
     const seen = new Set(
-      ((existingLatex ?? []) as unknown as { raw_latex: string }[]).map((row) => normalizeLatex(row.raw_latex)),
+      ((existingLatex ?? []) as unknown as { raw_latex: string }[]).map((row) =>
+        normalizeLatex(row.raw_latex),
+      ),
     );
     const dedupedEntryRows = entryRows.filter((entryRow, i) => {
       const normalized = normalizeLatex(entryRow.raw_latex as string);

@@ -10,7 +10,10 @@ const CELL_WIDTH = 140; // icon column width (w-32 = 128px) + gap
 const CELL_HEIGHT = 130; // glyph + up-to-2-line label + gap
 
 function cellAt(index: number) {
-  const columns = Math.max(1, Math.floor((CANVAS_WIDTH - PLACEMENT_ORIGIN.x) / CELL_WIDTH));
+  const columns = Math.max(
+    1,
+    Math.floor((CANVAS_WIDTH - PLACEMENT_ORIGIN.x) / CELL_WIDTH),
+  );
   const col = index % columns;
   const row = Math.floor(index / columns);
   return {
@@ -38,7 +41,9 @@ export function nextFreePlacement(occupied: { x: number; y: number }[]) {
     // requiring an exact match would let a dragged item's cell look "free"
     // and hand out an overlapping position anyway.
     const blocked = occupied.some(
-      (p) => Math.abs(p.x - candidate.x) < CELL_WIDTH && Math.abs(p.y - candidate.y) < CELL_HEIGHT,
+      (p) =>
+        Math.abs(p.x - candidate.x) < CELL_WIDTH &&
+        Math.abs(p.y - candidate.y) < CELL_HEIGHT,
     );
     if (!blocked) return candidate;
   }

@@ -25,20 +25,26 @@ describe("compileLatexInSandbox", () => {
     stop.mockReset();
     create.mockReset();
     process.env.TEXLIVE_SNAPSHOT_ID = "snap_test";
-    create.mockResolvedValue({ writeFiles, runCommand, readFileToBuffer, stop });
+    create.mockResolvedValue({
+      writeFiles,
+      runCommand,
+      readFileToBuffer,
+      stop,
+    });
   });
 
   afterEach(() => {
-    if (originalSnapshotId === undefined) delete process.env.TEXLIVE_SNAPSHOT_ID;
+    if (originalSnapshotId === undefined)
+      delete process.env.TEXLIVE_SNAPSHOT_ID;
     else process.env.TEXLIVE_SNAPSHOT_ID = originalSnapshotId;
   });
 
   it("throws before touching the sandbox if TEXLIVE_SNAPSHOT_ID is unset", async () => {
     delete process.env.TEXLIVE_SNAPSHOT_ID;
     const { compileLatexInSandbox } = await importSubject();
-    await expect(compileLatexInSandbox("\\documentclass{article}")).rejects.toThrow(
-      "TEXLIVE_SNAPSHOT_ID is not set",
-    );
+    await expect(
+      compileLatexInSandbox("\\documentclass{article}"),
+    ).rejects.toThrow("TEXLIVE_SNAPSHOT_ID is not set");
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -50,15 +56,22 @@ describe("compileLatexInSandbox", () => {
     readFileToBuffer.mockResolvedValue(Buffer.from("%PDF-fake"));
     const { compileLatexInSandbox } = await importSubject();
 
-    const source = "\\documentclass{article}\\begin{document}\\write18{echo pwned}\\end{document}";
+    const source =
+      "\\documentclass{article}\\begin{document}\\write18{echo pwned}\\end{document}";
     await compileLatexInSandbox(source);
 
     expect(writeFiles).toHaveBeenCalledTimes(1);
-    expect(writeFiles).toHaveBeenCalledWith([{ path: "resume.tex", content: source }]);
+    expect(writeFiles).toHaveBeenCalledWith([
+      { path: "resume.tex", content: source },
+    ]);
 
     expect(runCommand).toHaveBeenCalledTimes(2); // two-pass compile
     for (const call of runCommand.mock.calls) {
-      const [command, args, options] = call as [string, string[], { timeoutMs: number }];
+      const [command, args, options] = call as [
+        string,
+        string[],
+        { timeoutMs: number },
+      ];
       expect(command).toBe("pdflatex");
       expect(args.some((a) => a.includes("shell-escape"))).toBe(false);
       expect(args).toContain("-halt-on-error");
@@ -70,9 +83,9 @@ describe("compileLatexInSandbox", () => {
     runCommand.mockRejectedValue(new Error("command timed out"));
     const { compileLatexInSandbox } = await importSubject();
 
-    await expect(compileLatexInSandbox("\\documentclass{article}")).rejects.toThrow(
-      "command timed out",
-    );
+    await expect(
+      compileLatexInSandbox("\\documentclass{article}"),
+    ).rejects.toThrow("command timed out");
     expect(stop).toHaveBeenCalledTimes(1);
   });
 
@@ -83,7 +96,9 @@ describe("compileLatexInSandbox", () => {
     });
     const { compileLatexInSandbox } = await importSubject();
 
-    const result = await compileLatexInSandbox("\\documentclass{article}\\bogus");
+    const result = await compileLatexInSandbox(
+      "\\documentclass{article}\\bogus",
+    );
     expect(result.success).toBe(false);
     expect(result.pdf).toBeNull();
     expect(stop).toHaveBeenCalledTimes(1);

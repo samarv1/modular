@@ -1,6 +1,12 @@
 "use client";
 
-import { forwardRef, useImperativeHandle, useRef, useState, type DragEvent } from "react";
+import {
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type DragEvent,
+} from "react";
 import { Upload } from "lucide-react";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
 
@@ -85,7 +91,9 @@ export const UploadZone = forwardRef<
       onDragLeave={() => setDragOver(false)}
       onDrop={onDrop}
       className={`flex items-center gap-2 rounded-md border border-dashed px-3 py-2 text-[11.5px] transition-colors ${
-        dragOver ? "border-brand bg-brand-wash" : "border-line-strong text-faint"
+        dragOver
+          ? "border-brand bg-brand-wash"
+          : "border-line-strong text-faint"
       }`}
     >
       <Upload className="size-3.5 shrink-0" />
@@ -100,7 +108,8 @@ export const UploadZone = forwardRef<
           </button>
         </div>
         <span className="text-[10.5px] text-muted-fg">
-          Jake&apos;s Resume template ZIPs import faster and keep your exact formatting
+          Jake&apos;s Resume template ZIPs import faster and keep your exact
+          formatting
         </span>
       </div>
       {input}

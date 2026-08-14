@@ -38,24 +38,32 @@ Transcript written on resume.log.
 describe("summarizeCompileError", () => {
   it("treats a real LaTeX content error as the user's — not an environment issue", () => {
     const summary = summarizeCompileError(USER_LATEX_ERROR_LOG);
-    expect(summary.headline).toBe("Undefined control sequence. (near line 22 of the assembled document)");
+    expect(summary.headline).toBe(
+      "Undefined control sequence. (near line 22 of the assembled document)",
+    );
     expect(summary.isEnvironmentIssue).toBe(false);
   });
 
   it("treats a missing package/file as an environment issue, not the user's resume", () => {
     const summary = summarizeCompileError(MISSING_PACKAGE_LOG);
-    expect(summary.headline).toBe("The compile environment is missing a required file (ulem.sty).");
+    expect(summary.headline).toBe(
+      "The compile environment is missing a required file (ulem.sty).",
+    );
     expect(summary.isEnvironmentIssue).toBe(true);
   });
 
   it("treats a pre-compile infra failure (tagged by the compile route) as an environment issue", () => {
-    const summary = summarizeCompileError("Compile environment error: TEXLIVE_SNAPSHOT_ID is not set.");
+    const summary = summarizeCompileError(
+      "Compile environment error: TEXLIVE_SNAPSHOT_ID is not set.",
+    );
     expect(summary.headline).toBe("TEXLIVE_SNAPSHOT_ID is not set.");
     expect(summary.isEnvironmentIssue).toBe(true);
   });
 
   it("falls back to a generic message with no recognizable error line", () => {
-    const summary = summarizeCompileError("some unrelated stdout with no bang lines");
+    const summary = summarizeCompileError(
+      "some unrelated stdout with no bang lines",
+    );
     expect(summary.isEnvironmentIssue).toBe(true);
   });
 });

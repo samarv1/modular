@@ -4,8 +4,14 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { EntryEditor, HeaderFieldsEditor } from "@/components/bank/entry-editor";
-import type { ExtractedEntry, ResumeExtraction } from "@/lib/resume-extraction-schema";
+import {
+  EntryEditor,
+  HeaderFieldsEditor,
+} from "@/components/bank/entry-editor";
+import type {
+  ExtractedEntry,
+  ResumeExtraction,
+} from "@/lib/resume-extraction-schema";
 import type { BankEntryRow } from "@/lib/rows";
 
 type Phase = "loading" | "review" | "committing";
@@ -26,11 +32,18 @@ function withEntry(
   return { ...extraction, sections };
 }
 
-function removeEntry(extraction: ResumeExtraction, sectionIndex: number, entryIndex: number): ResumeExtraction {
+function removeEntry(
+  extraction: ResumeExtraction,
+  sectionIndex: number,
+  entryIndex: number,
+): ResumeExtraction {
   const sections = extraction.sections
     .map((section, si) => {
       if (si !== sectionIndex) return section;
-      return { ...section, entries: section.entries.filter((_, ei) => ei !== entryIndex) };
+      return {
+        ...section,
+        entries: section.entries.filter((_, ei) => ei !== entryIndex),
+      };
     })
     .filter((section) => section.entries.length > 0);
   return { ...extraction, sections };
@@ -62,16 +75,25 @@ export function PdfImportBody({
         const form = new FormData();
         form.set("file", file);
         form.set("mode", "preview");
-        const res = await fetch("/api/pdf-imports", { method: "POST", body: form });
+        const res = await fetch("/api/pdf-imports", {
+          method: "POST",
+          body: form,
+        });
         const body = await res.json().catch(() => null);
         if (cancelled) return;
         if (!res.ok || !body?.extraction) {
-          setErrorMessage(typeof body?.error === "string" ? body.error : "could not read that PDF");
+          setErrorMessage(
+            typeof body?.error === "string"
+              ? body.error
+              : "could not read that PDF",
+          );
           setPhase("review");
           return;
         }
         setExtraction(body.extraction);
-        setFilenameHint(typeof body.filenameHint === "string" ? body.filenameHint : "");
+        setFilenameHint(
+          typeof body.filenameHint === "string" ? body.filenameHint : "",
+        );
         setPhase("review");
       } catch {
         if (!cancelled) {
@@ -94,13 +116,20 @@ export function PdfImportBody({
       form.set("mode", "commit");
       form.set("extraction", JSON.stringify(extraction));
       form.set("filenameHint", filenameHint);
-      const res = await fetch("/api/pdf-imports", { method: "POST", body: form });
+      const res = await fetch("/api/pdf-imports", {
+        method: "POST",
+        body: form,
+      });
       const body = await res.json().catch(() => null);
       if (res.ok && body?.compatible) {
         onImported(body.entries ?? []);
         return;
       }
-      setErrorMessage(typeof body?.error === "string" ? body.error : "upload failed, try again");
+      setErrorMessage(
+        typeof body?.error === "string"
+          ? body.error
+          : "upload failed, try again",
+      );
       setPhase("review");
     } catch {
       setErrorMessage("upload failed, try again");
@@ -119,7 +148,9 @@ export function PdfImportBody({
   if (!extraction) {
     return (
       <div className="flex flex-col gap-3">
-        {errorMessage && <span className="text-[11.5px] text-danger">{errorMessage}</span>}
+        {errorMessage && (
+          <span className="text-[11.5px] text-danger">{errorMessage}</span>
+        )}
         <Button variant="outline" onClick={onCancel} className="self-start">
           Try another file
         </Button>
@@ -127,7 +158,10 @@ export function PdfImportBody({
     );
   }
 
-  const entryCount = extraction.sections.reduce((n, s) => n + s.entries.length, 0);
+  const entryCount = extraction.sections.reduce(
+    (n, s) => n + s.entries.length,
+    0,
+  );
 
   return (
     <>
@@ -138,7 +172,12 @@ export function PdfImportBody({
       <div className="flex max-h-[45vh] flex-col gap-4 overflow-y-auto pr-1 [scrollbar-gutter:stable]">
         <HeaderFieldsEditor
           header={extraction.header}
-          onChange={(patch) => setExtraction({ ...extraction, header: { ...extraction.header, ...patch } })}
+          onChange={(patch) =>
+            setExtraction({
+              ...extraction,
+              header: { ...extraction.header, ...patch },
+            })
+          }
         />
 
         {extraction.sections.map((section, sectionIndex) => (
@@ -157,25 +196,45 @@ export function PdfImportBody({
               <EntryEditor
                 key={entryIndex}
                 entry={entry}
-                onChange={(patch) => setExtraction(withEntry(extraction, sectionIndex, entryIndex, patch))}
-                onRemove={() => setExtraction(removeEntry(extraction, sectionIndex, entryIndex))}
+                onChange={(patch) =>
+                  setExtraction(
+                    withEntry(extraction, sectionIndex, entryIndex, patch),
+                  )
+                }
+                onRemove={() =>
+                  setExtraction(
+                    removeEntry(extraction, sectionIndex, entryIndex),
+                  )
+                }
               />
             ))}
           </div>
         ))}
       </div>
 
-      {errorMessage && <span className="text-[11.5px] text-danger">{errorMessage}</span>}
+      {errorMessage && (
+        <span className="text-[11.5px] text-danger">{errorMessage}</span>
+      )}
 
       <DialogFooter>
-        <Button variant="outline" onClick={onCancel} disabled={phase === "committing"}>
+        <Button
+          variant="outline"
+          onClick={onCancel}
+          disabled={phase === "committing"}
+        >
           Cancel
         </Button>
-        <Button onClick={commit} disabled={phase === "committing" || entryCount === 0}>
-          {phase === "committing" ? <Loader2 className="size-3.5 animate-spin" /> : `Approve (${entryCount})`}
+        <Button
+          onClick={commit}
+          disabled={phase === "committing" || entryCount === 0}
+        >
+          {phase === "committing" ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            `Approve (${entryCount})`
+          )}
         </Button>
       </DialogFooter>
     </>
   );
 }
-

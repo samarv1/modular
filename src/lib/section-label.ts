@@ -13,5 +13,7 @@ const KNOWN_SECTIONS = new Set([
 ]);
 
 export function sectionGroupLabel(sectionTitle: string): string {
-  return KNOWN_SECTIONS.has(sectionTitle.trim().toLowerCase()) ? sectionTitle : "Other";
+  return KNOWN_SECTIONS.has(sectionTitle.trim().toLowerCase())
+    ? sectionTitle
+    : "Other";
 }

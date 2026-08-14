@@ -3,8 +3,14 @@
 import { useRef, useState } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { Pencil } from "lucide-react";
-import { FOLDER_DRAG_PREFIX, FOLDER_DROP_PREFIX } from "@/components/home/desktop-dnd-ids";
-import { DesktopIconSlot, IconGlyphButton } from "@/components/home/desktop-icon";
+import {
+  FOLDER_DRAG_PREFIX,
+  FOLDER_DROP_PREFIX,
+} from "@/components/home/desktop-dnd-ids";
+import {
+  DesktopIconSlot,
+  IconGlyphButton,
+} from "@/components/home/desktop-icon";
 
 // A drawn folder shape (back tab + opaque front panel), not a bordered card
 // with a line icon inside — dragging moves the actual folder shape, closer
@@ -17,8 +23,18 @@ import { DesktopIconSlot, IconGlyphButton } from "@/components/home/desktop-icon
 // strings, not string-interpolated (`bg-${color}`) — Tailwind's build-time
 // scanner needs each class to appear literally or it won't generate it.
 const FOLDER_COLOR_CLASSES = {
-  brand: { tab: "bg-brand/85", tabOver: "bg-brand", front: "bg-brand", frontOver: "bg-brand ring-2 ring-brand ring-offset-1" },
-  warn: { tab: "bg-warn/85", tabOver: "bg-warn", front: "bg-warn", frontOver: "bg-warn ring-2 ring-warn ring-offset-1" },
+  brand: {
+    tab: "bg-brand/85",
+    tabOver: "bg-brand",
+    front: "bg-brand",
+    frontOver: "bg-brand ring-2 ring-brand ring-offset-1",
+  },
+  warn: {
+    tab: "bg-warn/85",
+    tabOver: "bg-warn",
+    front: "bg-warn",
+    frontOver: "bg-warn ring-2 ring-warn ring-offset-1",
+  },
 } as const;
 
 export function FolderGlyph({
@@ -34,7 +50,9 @@ export function FolderGlyph({
   return (
     <div className="relative h-14 w-16">
       {/* Back tab, part of the same folder shape */}
-      <span className={`absolute left-1 top-2 h-3 w-8 rounded-t-[3px] ${isOver ? classes.tabOver : classes.tab}`} />
+      <span
+        className={`absolute left-1 top-2 h-3 w-8 rounded-t-[3px] ${isOver ? classes.tabOver : classes.tab}`}
+      />
       {/* Generic stacked-papers peek, sticking out above the front panel — no
           real thumbnails yet (the compile worker that would produce a real
           preview is Phase 7, not built), just a visual cue there's content. */}
@@ -82,10 +100,18 @@ export function FolderIcon({
 }) {
   const [draft, setDraft] = useState(name);
   const cancelRenameRef = useRef(false);
-  const { attributes, listeners, setNodeRef: setDragRef, transform, isDragging } = useDraggable({
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragRef,
+    transform,
+    isDragging,
+  } = useDraggable({
     id: FOLDER_DRAG_PREFIX + id,
   });
-  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: FOLDER_DROP_PREFIX + id });
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
+    id: FOLDER_DROP_PREFIX + id,
+  });
 
   return (
     <DesktopIconSlot

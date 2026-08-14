@@ -8,7 +8,9 @@ import type { BankEntryRow } from "@/lib/rows";
 // import-review-modal.tsx) so it can show exactly what that upload
 // contributed, not the whole bank.
 export async function GET(request: Request) {
-  const sourceResumeId = new URL(request.url).searchParams.get("sourceResumeId");
+  const sourceResumeId = new URL(request.url).searchParams.get(
+    "sourceResumeId",
+  );
   const ownerId = await getOwnerId();
 
   let query = ownerScopedTable("bank_entry", ownerId).select(

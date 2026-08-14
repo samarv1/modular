@@ -24,7 +24,10 @@ option_src 0
 
 async function main() {
   console.log("creating sandbox...");
-  const sandbox = await Sandbox.create({ runtime: "node24", timeout: 20 * 60 * 1000 });
+  const sandbox = await Sandbox.create({
+    runtime: "node24",
+    timeout: 20 * 60 * 1000,
+  });
 
   try {
     console.log("downloading TeX Live installer...");
@@ -36,7 +39,9 @@ async function main() {
       "-c",
       "mkdir -p /tmp/install-tl && tar -xzf /tmp/install-tl.tar.gz -C /tmp/install-tl --strip-components=1",
     ]);
-    await sandbox.writeFiles([{ path: "/tmp/texlive.profile", content: INSTALL_PROFILE }]);
+    await sandbox.writeFiles([
+      { path: "/tmp/texlive.profile", content: INSTALL_PROFILE },
+    ]);
 
     console.log("installing TeX Live scheme-basic (this takes a while)...");
     // install-tl's own mirror auto-selection sometimes picks a dead mirror
@@ -53,10 +58,14 @@ async function main() {
       { timeoutMs: 15 * 60 * 1000 },
     );
     if (install.exitCode !== 0) {
-      throw new Error(`install-tl failed:\n${await install.stdout()}\n${await install.stderr()}`);
+      throw new Error(
+        `install-tl failed:\n${await install.stdout()}\n${await install.stderr()}`,
+      );
     }
 
-    console.log("installing collection-latexextra (this takes a while, ~2000 packages)...");
+    console.log(
+      "installing collection-latexextra (this takes a while, ~2000 packages)...",
+    );
     const tlmgr = await sandbox.runCommand(
       "sh",
       [
@@ -72,7 +81,9 @@ async function main() {
       // fresh sandbox even when every requested package installed fine —
       // the pdflatex verification below is the real acceptance check, so
       // this is a warning, not an abort.
-      console.warn(`tlmgr exited ${tlmgr.exitCode} (continuing, verifying pdflatex next):`);
+      console.warn(
+        `tlmgr exited ${tlmgr.exitCode} (continuing, verifying pdflatex next):`,
+      );
       console.warn((await tlmgr.stdout()).slice(-1500));
     }
 

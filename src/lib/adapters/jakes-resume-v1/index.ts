@@ -20,7 +20,8 @@ export const jakesResumeV1: TemplateAdapter = {
       const details = [
         ...contract.missing.map((m) => `missing required macro \\${m}`),
         ...contract.mismatched.map(
-          (m) => `\\${m.macro} expected ${m.expected} argument(s), found ${m.found}`,
+          (m) =>
+            `\\${m.macro} expected ${m.expected} argument(s), found ${m.found}`,
         ),
       ];
       return {
@@ -29,7 +30,11 @@ export const jakesResumeV1: TemplateAdapter = {
         mismatchReport: { reason: "macro contract mismatch", details },
       };
     }
-    return { compatible: true, adapterId: ADAPTER_ID, fingerprint: contract.fingerprint };
+    return {
+      compatible: true,
+      adapterId: ADAPTER_ID,
+      fingerprint: contract.fingerprint,
+    };
   },
 
   extract(project: ParsedLatexProject) {

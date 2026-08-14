@@ -21,7 +21,10 @@ export interface CompileErrorSummary {
 
 export function summarizeCompileError(raw: string): CompileErrorSummary {
   if (raw.startsWith(ENV_ERROR_PREFIX)) {
-    return { headline: raw.slice(ENV_ERROR_PREFIX.length), isEnvironmentIssue: true };
+    return {
+      headline: raw.slice(ENV_ERROR_PREFIX.length),
+      isEnvironmentIssue: true,
+    };
   }
 
   const missingFile = MISSING_FILE_RE.exec(raw);

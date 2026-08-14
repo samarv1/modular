@@ -1,8 +1,5 @@
 import JSZip from "jszip";
-import {
-  MAX_ARCHIVE_FILES,
-  MAX_LATEX_SOURCE_CHARS,
-} from "./archive-limits";
+import { MAX_ARCHIVE_FILES, MAX_LATEX_SOURCE_CHARS } from "./archive-limits";
 import { stripLatexComments } from "./latex-comments";
 
 export interface LatexArchive {
@@ -40,7 +37,9 @@ async function readLatexFile(file: JSZip.JSZipObject): Promise<string> {
  * MVP restriction (PLAN.md): one root file, no \input/\include — anything
  * else is rejected rather than partially supported.
  */
-export async function parseLatexArchive(zipBytes: Uint8Array): Promise<LatexArchive> {
+export async function parseLatexArchive(
+  zipBytes: Uint8Array,
+): Promise<LatexArchive> {
   let zip: JSZip;
   try {
     zip = await JSZip.loadAsync(zipBytes);
@@ -82,7 +81,9 @@ export async function parseLatexArchive(zipBytes: Uint8Array): Promise<LatexArch
     !/\\begin\s*\{document\}/.test(sourceWithoutComments) ||
     !/\\end\s*\{document\}/.test(sourceWithoutComments)
   ) {
-    throw new ArchiveRejectedError("root file is missing a document environment");
+    throw new ArchiveRejectedError(
+      "root file is missing a document environment",
+    );
   }
   // Only the document *body* matters here — preamble \input (e.g. Jake's own
   // canonical \input{glyphtounicode} for ATS readability) is normal and fine;

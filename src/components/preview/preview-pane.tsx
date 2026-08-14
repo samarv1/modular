@@ -77,7 +77,9 @@ export function PreviewPane({
             disabled={compiling}
             className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[10.5px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand disabled:opacity-50"
           >
-            <RefreshCw className={`size-3 ${compiling ? "animate-spin" : ""}`} />
+            <RefreshCw
+              className={`size-3 ${compiling ? "animate-spin" : ""}`}
+            />
             {compiling ? "Compiling" : "Compile"}
           </button>
         </div>
@@ -99,7 +101,9 @@ export function PreviewPane({
               <FileText className="size-3.5" />
               <span className="flex flex-col">
                 <span className="font-medium">PDF</span>
-                <span className="text-[10.5px] text-faint">Just the compiled resume</span>
+                <span className="text-[10.5px] text-faint">
+                  Just the compiled resume
+                </span>
               </span>
             </a>
             <button
@@ -112,7 +116,9 @@ export function PreviewPane({
             >
               <FolderArchive className="size-3.5" />
               <span className="flex flex-col">
-                <span className="font-medium">{exporting ? "Exporting…" : "LaTeX source (ZIP)"}</span>
+                <span className="font-medium">
+                  {exporting ? "Exporting…" : "LaTeX source (ZIP)"}
+                </span>
                 <span className="text-[10.5px] text-faint">
                   {compileStatus === "success"
                     ? "Full source + shell assets, no PDF"
@@ -126,13 +132,15 @@ export function PreviewPane({
 
       {compileStatus === "blocked_multipage" && (
         <p className="text-[11.5px] text-danger">
-          This build compiles to more than one page. Trim it to one page before exporting.
+          This build compiles to more than one page. Trim it to one page before
+          exporting.
         </p>
       )}
 
       {compileError &&
         (() => {
-          const { headline, isEnvironmentIssue } = summarizeCompileError(compileError);
+          const { headline, isEnvironmentIssue } =
+            summarizeCompileError(compileError);
           // Environment/infra failures (a missing package on the compile
           // setup, a Sandbox boot error) are our bugs, not the user's —
           // nothing actionable for them, so no detail or log is surfaced at
@@ -141,7 +149,8 @@ export function PreviewPane({
           if (isEnvironmentIssue) {
             return (
               <p className="rounded-md border border-line-strong bg-surface p-2 text-[11px] text-muted-fg">
-                Something went wrong compiling this resume. Try again in a moment.
+                Something went wrong compiling this resume. Try again in a
+                moment.
               </p>
             );
           }

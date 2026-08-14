@@ -18,11 +18,19 @@ export async function deleteOwnedRow(
   describeError?: (status: number, message: string) => string,
 ): Promise<NextResponse> {
   const ownerId = await getOwnerId();
-  const { data, error } = await ownerScopedTable(table, ownerId).delete().eq("id", id).select("id").maybeSingle();
+  const { data, error } = await ownerScopedTable(table, ownerId)
+    .delete()
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
   if (error) {
     const status = mutationErrorStatus(error);
     return NextResponse.json(
-      { error: describeError ? describeError(status, error.message) : error.message },
+      {
+        error: describeError
+          ? describeError(status, error.message)
+          : error.message,
+      },
       { status },
     );
   }

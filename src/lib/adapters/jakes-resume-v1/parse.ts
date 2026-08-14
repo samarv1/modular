@@ -11,7 +11,9 @@ export function parseJakeSource(source: string): LatexNode {
 export function documentBody(root: LatexNode): LatexNode[] {
   const content = root.content;
   if (!Array.isArray(content)) return [];
-  const doc = content.find((n) => n.type === "environment" && n.env === "document");
+  const doc = content.find(
+    (n) => n.type === "environment" && n.env === "document",
+  );
   const body = doc?.content;
   return Array.isArray(body) ? body : [];
 }

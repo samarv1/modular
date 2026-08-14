@@ -17,7 +17,9 @@ export interface CompileResult {
 
 const PAGE_COUNT_RE = /Output written on \S+ \((\d+) pages?,/;
 
-export async function compileLatexInSandbox(source: string): Promise<CompileResult> {
+export async function compileLatexInSandbox(
+  source: string,
+): Promise<CompileResult> {
   const snapshotId = process.env.TEXLIVE_SNAPSHOT_ID;
   if (!snapshotId) {
     throw new Error(
@@ -53,7 +55,12 @@ export async function compileLatexInSandbox(source: string): Promise<CompileResu
 
     const pdf = await sandbox.readFileToBuffer({ path: PDF_FILENAME });
     const pageCount = PAGE_COUNT_RE.exec(log)?.[1];
-    return { success: pdf !== null, pdf, log, pageCount: pageCount ? Number(pageCount) : null };
+    return {
+      success: pdf !== null,
+      pdf,
+      log,
+      pageCount: pageCount ? Number(pageCount) : null,
+    };
   } finally {
     await sandbox.stop();
   }

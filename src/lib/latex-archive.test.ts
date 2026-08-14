@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest";
 import { ArchiveRejectedError, parseLatexArchive } from "./latex-archive";
 import { MAX_ARCHIVE_FILES, MAX_LATEX_SOURCE_CHARS } from "./archive-limits";
 
-const fixture = readFileSync(join(__dirname, "../fixtures/jakes-resume/resume.tex"), "utf8");
+const fixture = readFileSync(
+  join(__dirname, "../fixtures/jakes-resume/resume.tex"),
+  "utf8",
+);
 
 async function zipOf(files: Record<string, string>) {
   const zip = new JSZip();
@@ -25,12 +28,16 @@ describe("parseLatexArchive", () => {
     const source =
       "\\documentclass{article}\\begin{document}\\input{other}\\end{document}";
     const bytes = await zipOf({ "resume.tex": source });
-    await expect(parseLatexArchive(bytes)).rejects.toThrow(ArchiveRejectedError);
+    await expect(parseLatexArchive(bytes)).rejects.toThrow(
+      ArchiveRejectedError,
+    );
   });
 
   it("rejects an archive with no .tex file", async () => {
     const bytes = await zipOf({ "readme.md": "hi" });
-    await expect(parseLatexArchive(bytes)).rejects.toThrow(ArchiveRejectedError);
+    await expect(parseLatexArchive(bytes)).rejects.toThrow(
+      ArchiveRejectedError,
+    );
   });
 
   it("rejects an archive with an ambiguous root file", async () => {
@@ -38,7 +45,9 @@ describe("parseLatexArchive", () => {
       "a.tex": "\\documentclass{article}\\begin{document}a\\end{document}",
       "b.tex": "\\documentclass{article}\\begin{document}b\\end{document}",
     });
-    await expect(parseLatexArchive(bytes)).rejects.toThrow(ArchiveRejectedError);
+    await expect(parseLatexArchive(bytes)).rejects.toThrow(
+      ArchiveRejectedError,
+    );
   });
 
   it("turns malformed ZIP data into an actionable rejection", async () => {
@@ -58,7 +67,9 @@ describe("parseLatexArchive", () => {
     const source =
       "\\documentclass{article}\\begin{document}\\input other.tex\\end{document}";
     const bytes = await zipOf({ "resume.tex": source });
-    await expect(parseLatexArchive(bytes)).rejects.toThrow(ArchiveRejectedError);
+    await expect(parseLatexArchive(bytes)).rejects.toThrow(
+      ArchiveRejectedError,
+    );
   });
 
   it("rejects a root file without a document environment", async () => {
@@ -70,7 +81,8 @@ describe("parseLatexArchive", () => {
 
   it("rejects an archive with more than MAX_ARCHIVE_FILES entries", async () => {
     const files: Record<string, string> = {
-      "resume.tex": "\\documentclass{article}\\begin{document}hi\\end{document}",
+      "resume.tex":
+        "\\documentclass{article}\\begin{document}hi\\end{document}",
     };
     for (let i = 0; i < MAX_ARCHIVE_FILES; i++) files[`asset-${i}.png`] = "x";
     const bytes = await zipOf(files);

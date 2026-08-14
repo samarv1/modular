@@ -23,13 +23,16 @@ vi.mock("@/lib/storage", () => ({
 // sense of this", matching the old pre-AI-fallback 422 behavior; individual
 // tests override this to exercise the successful-conversion path.
 vi.mock("@/lib/resume-extraction", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/resume-extraction")>("@/lib/resume-extraction");
+  const actual = await vi.importActual<
+    typeof import("@/lib/resume-extraction")
+  >("@/lib/resume-extraction");
   return {
     ...actual,
     extractResumeStructure: vi
       .fn()
-      .mockRejectedValue(new actual.ResumeExtractionError("mock: not a resume")),
+      .mockRejectedValue(
+        new actual.ResumeExtractionError("mock: not a resume"),
+      ),
   };
 });
 
@@ -47,7 +50,10 @@ function requestWithFile(file: File, fields?: Record<string, string>) {
   const form = new FormData();
   form.set("file", file);
   for (const [key, value] of Object.entries(fields ?? {})) form.set(key, value);
-  return new Request("http://localhost/api/imports", { method: "POST", body: form });
+  return new Request("http://localhost/api/imports", {
+    method: "POST",
+    body: form,
+  });
 }
 
 async function zipFileOf(tex: string, name: string) {
@@ -59,7 +65,10 @@ async function zipFileOf(tex: string, name: string) {
 
 describe("POST /api/imports — pre-DB rejections", () => {
   it("rejects a file over MAX_ARCHIVE_BYTES with 413, without touching storage or the DB", async () => {
-    const oversized = new File([new Uint8Array(MAX_ARCHIVE_BYTES + 1)], "resume.zip");
+    const oversized = new File(
+      [new Uint8Array(MAX_ARCHIVE_BYTES + 1)],
+      "resume.zip",
+    );
     const res = await POST(requestWithFile(oversized));
     expect(res.status).toBe(413);
     const body = await res.json();
@@ -68,18 +77,29 @@ describe("POST /api/imports — pre-DB rejections", () => {
 
   it("rejects a request with no file", async () => {
     const res = await POST(
-      new Request("http://localhost/api/imports", { method: "POST", body: new FormData() }),
+      new Request("http://localhost/api/imports", {
+        method: "POST",
+        body: new FormData(),
+      }),
     );
     expect(res.status).toBe(400);
   });
 
   it("rejects a non-multipart body", async () => {
-    const res = await POST(new Request("http://localhost/api/imports", { method: "POST", body: "not form data" }));
+    const res = await POST(
+      new Request("http://localhost/api/imports", {
+        method: "POST",
+        body: "not form data",
+      }),
+    );
     expect(res.status).toBe(400);
   });
 
   it("rejects a malformed ZIP with a 422 mismatch, before any storage upload", async () => {
-    const badZip = new File([new TextEncoder().encode("not a zip")], "resume.zip");
+    const badZip = new File(
+      [new TextEncoder().encode("not a zip")],
+      "resume.zip",
+    );
     const res = await POST(requestWithFile(badZip));
     expect(res.status).toBe(422);
     const body = await res.json();
@@ -105,16 +125,24 @@ describe("POST /api/imports — duplicate entry detection", () => {
 
   afterAll(async () => {
     for (const id of sourceResumeIds) {
-      await ownerScopedTable("bank_entry", testOwnerId).delete().eq("source_resume_id", id);
-      await ownerScopedTable("source_resume", testOwnerId).delete().eq("id", id);
+      await ownerScopedTable("bank_entry", testOwnerId)
+        .delete()
+        .eq("source_resume_id", id);
+      await ownerScopedTable("source_resume", testOwnerId)
+        .delete()
+        .eq("id", id);
     }
     if (templateShellId) {
-      await ownerScopedTable("template_shell", testOwnerId).delete().eq("id", templateShellId);
+      await ownerScopedTable("template_shell", testOwnerId)
+        .delete()
+        .eq("id", templateShellId);
     }
   });
 
   it("imports every entry on the first upload of a resume", async () => {
-    const res = await POST(requestWithFile(await zipFileOf(fixture, "resume.zip")));
+    const res = await POST(
+      requestWithFile(await zipFileOf(fixture, "resume.zip")),
+    );
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.compatible).toBe(true);
@@ -124,7 +152,9 @@ describe("POST /api/imports — duplicate entry detection", () => {
   });
 
   it("imports zero new entries when the identical resume is uploaded again", async () => {
-    const res = await POST(requestWithFile(await zipFileOf(fixture, "resume-copy.zip")));
+    const res = await POST(
+      requestWithFile(await zipFileOf(fixture, "resume-copy.zip")),
+    );
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.compatible).toBe(true);
@@ -133,11 +163,16 @@ describe("POST /api/imports — duplicate entry detection", () => {
     sourceResumeIds.push(body.sourceResumeId);
 
     // Confirm no duplicate rows actually landed in bank_entry.
-    const { data: allEntries, error } = await ownerScopedTable("bank_entry", testOwnerId)
+    const { data: allEntries, error } = await ownerScopedTable(
+      "bank_entry",
+      testOwnerId,
+    )
       .select("raw_latex")
       .in("source_resume_id", sourceResumeIds);
     if (error) throw new Error(error.message);
-    const rawLatexValues = (allEntries ?? []).map((row) => (row as unknown as { raw_latex: string }).raw_latex);
+    const rawLatexValues = (allEntries ?? []).map(
+      (row) => (row as unknown as { raw_latex: string }).raw_latex,
+    );
     expect(new Set(rawLatexValues).size).toBe(rawLatexValues.length);
   });
 
@@ -146,7 +181,9 @@ describe("POST /api/imports — duplicate entry detection", () => {
     // (header, education, experience, the other project, skills) is still
     // an exact match against what's already in the bank.
     const modifiedFixture = fixture.replace("Gitlytics", "Gitlytics2");
-    const res = await POST(requestWithFile(await zipFileOf(modifiedFixture, "resume-modified.zip")));
+    const res = await POST(
+      requestWithFile(await zipFileOf(modifiedFixture, "resume-modified.zip")),
+    );
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.compatible).toBe(true);
@@ -164,7 +201,9 @@ describe("POST /api/imports — preview mode", () => {
 
   it("parses and returns entries without touching storage or the DB", async () => {
     const res = await POST(
-      requestWithFile(await zipFileOf(fixture, "preview.zip"), { mode: "preview" }),
+      requestWithFile(await zipFileOf(fixture, "preview.zip"), {
+        mode: "preview",
+      }),
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -176,12 +215,19 @@ describe("POST /api/imports — preview mode", () => {
 
     // Nothing was persisted — a fresh preview of the same file reports the
     // same entries as new (not flagged as duplicates of themselves).
-    expect(body.entries.every((e: { isDuplicate: boolean }) => e.isDuplicate === false)).toBe(true);
+    expect(
+      body.entries.every(
+        (e: { isDuplicate: boolean }) => e.isDuplicate === false,
+      ),
+    ).toBe(true);
   });
 
   it("still reports a structural mismatch as 422 with no DB writes", async () => {
     const zip = new JSZip();
-    zip.file("resume.tex", "\\documentclass{article}\\begin{document}not jake\\end{document}");
+    zip.file(
+      "resume.tex",
+      "\\documentclass{article}\\begin{document}not jake\\end{document}",
+    );
     const bytes = await zip.generateAsync({ type: "arraybuffer" });
     const file = new File([bytes], "mismatch.zip");
     const res = await POST(requestWithFile(file, { mode: "preview" }));
@@ -199,11 +245,17 @@ describe("POST /api/imports — AI fallback for non-Jake zips", () => {
 
   afterAll(async () => {
     for (const id of sourceResumeIds) {
-      await ownerScopedTable("bank_entry", testOwnerId).delete().eq("source_resume_id", id);
-      await ownerScopedTable("source_resume", testOwnerId).delete().eq("id", id);
+      await ownerScopedTable("bank_entry", testOwnerId)
+        .delete()
+        .eq("source_resume_id", id);
+      await ownerScopedTable("source_resume", testOwnerId)
+        .delete()
+        .eq("id", id);
     }
     if (templateShellId) {
-      await ownerScopedTable("template_shell", testOwnerId).delete().eq("id", templateShellId);
+      await ownerScopedTable("template_shell", testOwnerId)
+        .delete()
+        .eq("id", templateShellId);
     }
   });
 
@@ -214,14 +266,21 @@ describe("POST /api/imports — AI fallback for non-Jake zips", () => {
         {
           title: "Technical Skills",
           entries: [
-            { kind: "section_chunk", sourceSection: "Technical Skills", items: ["Languages: TypeScript"] },
+            {
+              kind: "section_chunk",
+              sourceSection: "Technical Skills",
+              items: ["Languages: TypeScript"],
+            },
           ],
         },
       ],
     });
 
     const zip = new JSZip();
-    zip.file("resume.tex", "\\documentclass{article}\\begin{document}not jake\\end{document}");
+    zip.file(
+      "resume.tex",
+      "\\documentclass{article}\\begin{document}not jake\\end{document}",
+    );
     const bytes = await zip.generateAsync({ type: "arraybuffer" });
     const file = new File([bytes], "not-jake.zip");
 
@@ -237,7 +296,10 @@ describe("POST /api/imports — AI fallback for non-Jake zips", () => {
   it("still 422s with the original mismatch report when AI conversion also fails", async () => {
     vi.mocked(uploadArchive).mockClear();
     const zip = new JSZip();
-    zip.file("resume.tex", "\\documentclass{article}\\begin{document}not jake\\end{document}");
+    zip.file(
+      "resume.tex",
+      "\\documentclass{article}\\begin{document}not jake\\end{document}",
+    );
     const bytes = await zip.generateAsync({ type: "arraybuffer" });
     const file = new File([bytes], "not-jake-2.zip");
 
@@ -256,16 +318,24 @@ describe("POST /api/imports — commit mode with overrides", () => {
 
   afterAll(async () => {
     for (const id of sourceResumeIds) {
-      await ownerScopedTable("bank_entry", testOwnerId).delete().eq("source_resume_id", id);
-      await ownerScopedTable("source_resume", testOwnerId).delete().eq("id", id);
+      await ownerScopedTable("bank_entry", testOwnerId)
+        .delete()
+        .eq("source_resume_id", id);
+      await ownerScopedTable("source_resume", testOwnerId)
+        .delete()
+        .eq("id", id);
     }
     if (templateShellId) {
-      await ownerScopedTable("template_shell", testOwnerId).delete().eq("id", templateShellId);
+      await ownerScopedTable("template_shell", testOwnerId)
+        .delete()
+        .eq("id", templateShellId);
     }
   });
 
   async function preview(tex: string, name: string) {
-    const res = await POST(requestWithFile(await zipFileOf(tex, name), { mode: "preview" }));
+    const res = await POST(
+      requestWithFile(await zipFileOf(tex, name), { mode: "preview" }),
+    );
     expect(res.status).toBe(200);
     return res.json();
   }
@@ -292,9 +362,14 @@ describe("POST /api/imports — commit mode with overrides", () => {
     sourceResumeIds.push(body.sourceResumeId);
     templateShellId = body.templateShellId;
 
-    expect(body.entries.some((e: { kind: string }) => e.kind === "header_chunk")).toBe(false);
     expect(
-      body.entries.some((e: { display_name: string }) => e.display_name === "Renamed via override"),
+      body.entries.some((e: { kind: string }) => e.kind === "header_chunk"),
+    ).toBe(false);
+    expect(
+      body.entries.some(
+        (e: { display_name: string }) =>
+          e.display_name === "Renamed via override",
+      ),
     ).toBe(true);
   });
 
@@ -318,13 +393,22 @@ describe("POST /api/imports — commit mode with overrides", () => {
     // excluded its header_chunk — so everything except the header previews
     // as a duplicate here.
     const previewBody = await preview(fixture, "overrides-c.zip");
-    const entries: { index: number; isDuplicate: boolean }[] = previewBody.entries;
+    const entries: { index: number; isDuplicate: boolean }[] =
+      previewBody.entries;
     const keepIndex = entries.find((e) => e.isDuplicate)!.index;
 
-    const overrides: { index: number; excluded: boolean; includeDuplicate?: boolean }[] = entries
+    const overrides: {
+      index: number;
+      excluded: boolean;
+      includeDuplicate?: boolean;
+    }[] = entries
       .filter((e) => e.index !== keepIndex)
       .map((e) => ({ index: e.index, excluded: true }));
-    overrides.push({ index: keepIndex, excluded: false, includeDuplicate: true });
+    overrides.push({
+      index: keepIndex,
+      excluded: false,
+      includeDuplicate: true,
+    });
 
     const res = await POST(
       requestWithFile(await zipFileOf(fixture, "overrides-c.zip"), {

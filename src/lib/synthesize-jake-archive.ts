@@ -20,6 +20,9 @@ export async function synthesizeJakeArchive(extraction: ResumeExtraction) {
   const zipBytes = await zip.generateAsync({ type: "uint8array" });
 
   const archive = await parseLatexArchive(zipBytes);
-  const { adapter, result } = detectAdapter({ rootFile: archive.rootFile, source: archive.source });
+  const { adapter, result } = detectAdapter({
+    rootFile: archive.rootFile,
+    source: archive.source,
+  });
   return { zipBytes, archive, adapter, result };
 }

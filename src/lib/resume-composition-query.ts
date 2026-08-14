@@ -42,7 +42,11 @@ export async function loadResumeComposition(
   if (resumeError) throw new Error(resumeError.message);
   if (!resume) return null;
 
-  const { data: sections, error: sectionsError } = asRows<{ id: string; title: string; position: number }>(
+  const { data: sections, error: sectionsError } = asRows<{
+    id: string;
+    title: string;
+    position: number;
+  }>(
     await ownerScopedTable("resume_section", ownerId)
       .select("id, title, position")
       .eq("resume_id", resumeId)
@@ -69,7 +73,11 @@ export async function loadResumeComposition(
     position: section.position,
     entries: (entries ?? [])
       .filter((e) => e.resume_section_id === section.id)
-      .map((e) => ({ id: e.id, bankEntryId: e.bank_entry_id, position: e.position })),
+      .map((e) => ({
+        id: e.id,
+        bankEntryId: e.bank_entry_id,
+        position: e.position,
+      })),
   }));
 
   return { resume, sections: sectionRows };

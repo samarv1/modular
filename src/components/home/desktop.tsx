@@ -11,7 +11,13 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { FolderPlus, Plus, Trash2, Upload, type LucideIcon } from "lucide-react";
+import {
+  FolderPlus,
+  Plus,
+  Trash2,
+  Upload,
+  type LucideIcon,
+} from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { backToDesktopButtonClass } from "@/components/back-to-desktop";
 import {
@@ -65,7 +71,12 @@ function BankFileIcon({
       >
         <DocumentGlyph />
       </IconGlyphButton>
-      <IconLabel title={title} selected={selected} onSelect={onSelect} onOpen={onOpen} />
+      <IconLabel
+        title={title}
+        selected={selected}
+        onSelect={onSelect}
+        onOpen={onOpen}
+      />
     </div>
   );
 }
@@ -91,7 +102,9 @@ function ToolbarButton({
       onClick={onClick}
       disabled={disabled}
       className={`flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-fg ${
-        tone === "danger" ? "hover:border-danger hover:text-danger" : "hover:border-brand hover:text-brand"
+        tone === "danger"
+          ? "hover:border-danger hover:text-danger"
+          : "hover:border-brand hover:text-brand"
       } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-muted-fg`}
     >
       <Icon className="size-3" />
@@ -133,9 +146,10 @@ export function Desktop({
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   // Finder-style selection: one item at a time, first click highlights and
   // the second (double) click opens.
-  const [selected, setSelected] = useState<
-    { kind: "folder" | "resume" | "page" | "bank"; id: string } | null
-  >(null);
+  const [selected, setSelected] = useState<{
+    kind: "folder" | "resume" | "page" | "bank";
+    id: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -191,13 +205,16 @@ export function Desktop({
   // create a blank resume" has to track the live bank count, not just
   // whether a shell was ever made. Falls back to the server-computed prop
   // only until the client-side bank fetch above resolves.
-  const templateShellAvailable = bankFiles === null ? hasTemplateShell : bankFiles.length > 0;
+  const templateShellAvailable =
+    bankFiles === null ? hasTemplateShell : bankFiles.length > 0;
 
   // Static pages aren't owner data, so their desktop position lives in
   // localStorage, not the DB. Seeded with a grid default here (SSR-safe —
   // no localStorage access during render) and overwritten client-side once
   // mounted, if a saved position exists.
-  const [pagePositions, setPagePositions] = useState<Record<string, { x: number; y: number }>>(() => {
+  const [pagePositions, setPagePositions] = useState<
+    Record<string, { x: number; y: number }>
+  >(() => {
     const initial: Record<string, { x: number; y: number }> = {};
     STATIC_PAGES.forEach((page, i) => {
       const pos = nextPlacement(i);
@@ -241,15 +258,23 @@ export function Desktop({
         (p): p is { x: number; y: number } => !!p,
       ),
       ...folders.map((f) => ({ x: f.position_x, y: f.position_y })),
-      ...resumes.filter((r) => r.folder_id === null).map((r) => ({ x: r.position_x, y: r.position_y })),
+      ...resumes
+        .filter((r) => r.folder_id === null)
+        .map((r) => ({ x: r.position_x, y: r.position_y })),
     ];
   }
 
-  function occupiedFolderPositions(folderId: string): { x: number; y: number }[] {
-    return resumes.filter((r) => r.folder_id === folderId).map((r) => ({ x: r.position_x, y: r.position_y }));
+  function occupiedFolderPositions(
+    folderId: string,
+  ): { x: number; y: number }[] {
+    return resumes
+      .filter((r) => r.folder_id === folderId)
+      .map((r) => ({ x: r.position_x, y: r.position_y }));
   }
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+  );
 
   const visibleFolders = currentFolderId === null ? folders : [];
   const visibleResumes = useMemo(
@@ -288,7 +313,9 @@ export function Desktop({
       })
       .catch(() => {
         if (resumePatchVersions.current.get(id) !== version) return;
-        setResumes((cur) => cur.map((resume) => (resume.id === id ? previous : resume)));
+        setResumes((cur) =>
+          cur.map((resume) => (resume.id === id ? previous : resume)),
+        );
         showError("Resume changes could not be saved.");
       });
   }
@@ -307,7 +334,9 @@ export function Desktop({
     })
       .then(async (res) => {
         if (!res.ok) throw new Error("folder update failed");
-        const body = (await res.json()) as { folder?: Partial<ResumeFolderRow> };
+        const body = (await res.json()) as {
+          folder?: Partial<ResumeFolderRow>;
+        };
         if (folderPatchVersions.current.get(id) === version && body.folder) {
           setFolders((cur) =>
             cur.map((folder) =>
@@ -318,7 +347,9 @@ export function Desktop({
       })
       .catch(() => {
         if (folderPatchVersions.current.get(id) !== version) return;
-        setFolders((cur) => cur.map((folder) => (folder.id === id ? previous : folder)));
+        setFolders((cur) =>
+          cur.map((folder) => (folder.id === id ? previous : folder)),
+        );
         showError("Folder changes could not be saved.");
       });
   }
@@ -337,7 +368,16 @@ export function Desktop({
         const folderId = overId.slice(FOLDER_DROP_PREFIX.length);
         const pos = nextFreePlacement(occupiedFolderPositions(folderId));
         setResumes((cur) =>
-          cur.map((r) => (r.id === resumeId ? { ...r, folder_id: folderId, position_x: pos.x, position_y: pos.y } : r)),
+          cur.map((r) =>
+            r.id === resumeId
+              ? {
+                  ...r,
+                  folder_id: folderId,
+                  position_x: pos.x,
+                  position_y: pos.y,
+                }
+              : r,
+          ),
         );
         patchResume(
           resumeId,
@@ -349,7 +389,11 @@ export function Desktop({
       if (overId === DESKTOP_BACK_DROP_ID) {
         const pos = nextFreePlacement(occupiedRootPositions());
         setResumes((cur) =>
-          cur.map((r) => (r.id === resumeId ? { ...r, folder_id: null, position_x: pos.x, position_y: pos.y } : r)),
+          cur.map((r) =>
+            r.id === resumeId
+              ? { ...r, folder_id: null, position_x: pos.x, position_y: pos.y }
+              : r,
+          ),
         );
         patchResume(
           resumeId,
@@ -364,7 +408,13 @@ export function Desktop({
       // the PATCH with a Postgres 22P02 error that got silently swallowed.
       const nextX = Math.round(resume.position_x + delta.x);
       const nextY = Math.round(resume.position_y + delta.y);
-      setResumes((cur) => cur.map((r) => (r.id === resumeId ? { ...r, position_x: nextX, position_y: nextY } : r)));
+      setResumes((cur) =>
+        cur.map((r) =>
+          r.id === resumeId
+            ? { ...r, position_x: nextX, position_y: nextY }
+            : r,
+        ),
+      );
       patchResume(resumeId, { positionX: nextX, positionY: nextY }, resume);
       return;
     }
@@ -375,7 +425,13 @@ export function Desktop({
       if (!folder) return;
       const nextX = Math.round(folder.position_x + delta.x);
       const nextY = Math.round(folder.position_y + delta.y);
-      setFolders((cur) => cur.map((f) => (f.id === folderId ? { ...f, position_x: nextX, position_y: nextY } : f)));
+      setFolders((cur) =>
+        cur.map((f) =>
+          f.id === folderId
+            ? { ...f, position_x: nextX, position_y: nextY }
+            : f,
+        ),
+      );
       patchFolder(folderId, { positionX: nextX, positionY: nextY }, folder);
       return;
     }
@@ -413,7 +469,9 @@ export function Desktop({
     if (!trimmed) return;
     const previous = folders.find((folder) => folder.id === id);
     if (!previous || trimmed === previous.name) return;
-    setFolders((cur) => cur.map((f) => (f.id === id ? { ...f, name: trimmed } : f)));
+    setFolders((cur) =>
+      cur.map((f) => (f.id === id ? { ...f, name: trimmed } : f)),
+    );
     patchFolder(id, { name: trimmed }, previous);
   }
 
@@ -421,9 +479,10 @@ export function Desktop({
   // matches the app's own styling — deleteTarget holds what's pending
   // confirmation, separate from `selected` so the dialog survives even if
   // the click that opened it also happened to deselect the icon.
-  const [deleteTarget, setDeleteTarget] = useState<
-    { kind: "folder" | "resume" | "bank"; id: string } | null
-  >(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    kind: "folder" | "resume" | "bank";
+    id: string;
+  } | null>(null);
 
   function confirmDeleteSelected() {
     if (!selected || selected.kind === "page") return;
@@ -448,11 +507,15 @@ export function Desktop({
     setDeleteTarget(null);
     setSelected((cur) => (cur?.kind === kind && cur.id === id ? null : cur));
     try {
-      const res = await fetch(`/api/${DELETE_ENDPOINT[kind]}/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/${DELETE_ENDPOINT[kind]}/${id}`, {
+        method: "DELETE",
+      });
       if (!res.ok && res.status !== 404) throw new Error("delete failed");
       if (kind === "folder") {
         setFolders((cur) => cur.filter((f) => f.id !== id));
-        setResumes((cur) => cur.map((r) => (r.folder_id === id ? { ...r, folder_id: null } : r)));
+        setResumes((cur) =>
+          cur.map((r) => (r.folder_id === id ? { ...r, folder_id: null } : r)),
+        );
       } else if (kind === "resume") {
         setResumes((cur) => cur.filter((r) => r.id !== id));
       } else {
@@ -490,7 +553,9 @@ export function Desktop({
       return;
     }
     const pos = nextFreePlacement(
-      currentFolderId === null ? occupiedRootPositions() : occupiedFolderPositions(currentFolderId),
+      currentFolderId === null
+        ? occupiedRootPositions()
+        : occupiedFolderPositions(currentFolderId),
     );
     try {
       const res = await fetch("/api/resumes", {
@@ -518,7 +583,10 @@ export function Desktop({
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-3 py-2">
         {openPage ? (
           <>
-            <button onClick={() => setOpenPageId(null)} className={backToDesktopButtonClass}>
+            <button
+              onClick={() => setOpenPageId(null)}
+              className={backToDesktopButtonClass}
+            >
               ← Desktop
             </button>
             {openPage.kind === "bank" && (
@@ -547,9 +615,21 @@ export function Desktop({
               </>
             )}
             <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] uppercase tracking-wide text-faint">Create</span>
-              {!currentFolder && <ToolbarButton icon={FolderPlus} label="New folder" onClick={createFolder} />}
-              <ToolbarButton icon={Plus} label="New resume" onClick={createResume} />
+              <span className="font-mono text-[10px] uppercase tracking-wide text-faint">
+                Create
+              </span>
+              {!currentFolder && (
+                <ToolbarButton
+                  icon={FolderPlus}
+                  label="New folder"
+                  onClick={createFolder}
+                />
+              )}
+              <ToolbarButton
+                icon={Plus}
+                label="New resume"
+                onClick={createResume}
+              />
               <ToolbarButton
                 icon={Trash2}
                 label="Delete"
@@ -569,7 +649,9 @@ export function Desktop({
             />
           </>
         )}
-        {error && <span className="px-2 text-[11.5px] text-danger">{error}</span>}
+        {error && (
+          <span className="px-2 text-[11.5px] text-danger">{error}</span>
+        )}
       </div>
 
       <ImportReviewModal
@@ -626,13 +708,18 @@ export function Desktop({
                       <BankFileIcon
                         key={file.id}
                         title={file.display_name ?? file.id.slice(0, 6)}
-                        selected={selected?.kind === "bank" && selected.id === file.id}
-                        onSelect={() => setSelected({ kind: "bank", id: file.id })}
+                        selected={
+                          selected?.kind === "bank" && selected.id === file.id
+                        }
+                        onSelect={() =>
+                          setSelected({ kind: "bank", id: file.id })
+                        }
                         onOpen={() => {
                           setSelected(null);
                           setEditingSourceResume({
                             id: file.id,
-                            displayName: file.display_name ?? file.id.slice(0, 6),
+                            displayName:
+                              file.display_name ?? file.id.slice(0, 6),
                           });
                           setImportModalOpen(true);
                         }}
@@ -644,7 +731,9 @@ export function Desktop({
             ) : openPage ? (
               <div className="absolute inset-0 overflow-auto p-8">
                 {openPage.content ? (
-                  <div className="whitespace-pre-wrap text-[13px] text-ink">{openPage.content}</div>
+                  <div className="whitespace-pre-wrap text-[13px] text-ink">
+                    {openPage.content}
+                  </div>
                 ) : (
                   <div className="flex h-full items-center justify-center text-[12.5px] text-faint">
                     Nothing here yet.
@@ -673,8 +762,12 @@ export function Desktop({
                     y={folder.position_y}
                     hasContents={resumes.some((r) => r.folder_id === folder.id)}
                     renaming={renamingFolderId === folder.id}
-                    selected={selected?.kind === "folder" && selected.id === folder.id}
-                    onSelect={() => setSelected({ kind: "folder", id: folder.id })}
+                    selected={
+                      selected?.kind === "folder" && selected.id === folder.id
+                    }
+                    onSelect={() =>
+                      setSelected({ kind: "folder", id: folder.id })
+                    }
                     onStartRename={() => setRenamingFolderId(folder.id)}
                     onCommitRename={(name) => renameFolder(folder.id, name)}
                     onOpen={() => {
@@ -690,8 +783,12 @@ export function Desktop({
                     title={resume.title}
                     x={resume.position_x}
                     y={resume.position_y}
-                    selected={selected?.kind === "resume" && selected.id === resume.id}
-                    onSelect={() => setSelected({ kind: "resume", id: resume.id })}
+                    selected={
+                      selected?.kind === "resume" && selected.id === resume.id
+                    }
+                    onSelect={() =>
+                      setSelected({ kind: "resume", id: resume.id })
+                    }
                   />
                 ))}
                 {currentFolderId === null &&
@@ -703,9 +800,17 @@ export function Desktop({
                       x={pagePositions[page.id]?.x ?? 24}
                       y={pagePositions[page.id]?.y ?? 24}
                       glyph={page.kind === "bank" ? "folder" : "document"}
-                      hasContents={page.kind === "bank" ? (bankFiles?.length ?? 0) > 0 : undefined}
-                      selected={selected?.kind === "page" && selected.id === page.id}
-                      onSelect={() => setSelected({ kind: "page", id: page.id })}
+                      hasContents={
+                        page.kind === "bank"
+                          ? (bankFiles?.length ?? 0) > 0
+                          : undefined
+                      }
+                      selected={
+                        selected?.kind === "page" && selected.id === page.id
+                      }
+                      onSelect={() =>
+                        setSelected({ kind: "page", id: page.id })
+                      }
                       onOpen={() => {
                         setSelected(null);
                         setOpenPageId(page.id);
@@ -727,7 +832,12 @@ export function Desktop({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {deleteTarget?.kind === "folder" ? "folder" : deleteTarget?.kind === "bank" ? "upload" : "resume"}
+              Delete{" "}
+              {deleteTarget?.kind === "folder"
+                ? "folder"
+                : deleteTarget?.kind === "bank"
+                  ? "upload"
+                  : "resume"}
               &ldquo;{deleteTargetLabel ?? "this item"}&rdquo;?
             </AlertDialogTitle>
             <AlertDialogDescription>

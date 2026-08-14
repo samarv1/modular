@@ -16,12 +16,22 @@ import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { Pencil } from "lucide-react";
 import { BackToDesktopLink } from "@/components/back-to-desktop";
 import { BankPane, BankEntryCardVisual } from "@/components/bank/bank-pane";
-import { OutlinePane, type EditorSection } from "@/components/outline/outline-pane";
+import {
+  OutlinePane,
+  type EditorSection,
+} from "@/components/outline/outline-pane";
 import { PreviewPane } from "@/components/preview/preview-pane";
-import { BANK_DRAG_PREFIX, NEW_SECTION_DROP_ID, SECTION_APPEND_PREFIX } from "@/components/dnd-ids";
+import {
+  BANK_DRAG_PREFIX,
+  NEW_SECTION_DROP_ID,
+  SECTION_APPEND_PREFIX,
+} from "@/components/dnd-ids";
 import type { BankEntryRow } from "@/lib/rows";
 import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
-import type { ResumeMetaRow, ResumeSectionRow } from "@/lib/resume-composition-query";
+import type {
+  ResumeMetaRow,
+  ResumeSectionRow,
+} from "@/lib/resume-composition-query";
 
 // Single current-resume title, click-to-rename. Switching between resumes
 // happens on the home page (src/app/page.tsx) — this editor only ever works
@@ -121,7 +131,9 @@ function SplitDivider({
         onHoverChange(false);
         clearHoverCursor("col-resize");
       }}
-      style={{ cursor: active ? "col-resize" : hovered ? "col-resize" : undefined }}
+      style={{
+        cursor: active ? "col-resize" : hovered ? "col-resize" : undefined,
+      }}
       className="group relative w-2 shrink-0 cursor-auto touch-none"
     >
       <div
@@ -139,7 +151,10 @@ function toEditorSections(sections: ResumeSectionRow[]): EditorSection[] {
     .sort((a, b) => a.position - b.position)
     .map((s) => ({
       title: s.title,
-      entries: s.entries.slice().sort((a, b) => a.position - b.position).map((e) => e.bankEntryId),
+      entries: s.entries
+        .slice()
+        .sort((a, b) => a.position - b.position)
+        .map((e) => e.bankEntryId),
     }));
 }
 
@@ -163,7 +178,9 @@ export function ResumeEditor({
   // resumes happens by navigating, on the home page, not by swapping state
   // here.
   const [resume, setResume] = useState(initialResume);
-  const [sections, setSections] = useState<EditorSection[]>(toEditorSections(initialSections));
+  const [sections, setSections] = useState<EditorSection[]>(
+    toEditorSections(initialSections),
+  );
   const [addError, setAddError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState(initialPdfUrl);
@@ -192,8 +209,14 @@ export function ResumeEditor({
     addErrorTimerRef.current = setTimeout(() => setAddError(null), 3500);
   }
 
-  const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries]);
-  const usedEntryIds = useMemo(() => new Set(sections.flatMap((s) => s.entries)), [sections]);
+  const entryById = useMemo(
+    () => new Map(entries.map((e) => [e.id, e])),
+    [entries],
+  );
+  const usedEntryIds = useMemo(
+    () => new Set(sections.flatMap((s) => s.entries)),
+    [sections],
+  );
 
   // Composition writes are serialized and coalesced: while one request is in
   // flight, only the newest pending snapshot is retained. This prevents an
@@ -208,7 +231,8 @@ export function ResumeEditor({
   // browser throws that state away instead of losing it silently.
   useEffect(() => {
     function handleBeforeUnload(e: BeforeUnloadEvent) {
-      const hasUnsavedChanges = saveError !== null || saveQueueRef.current.pending !== null;
+      const hasUnsavedChanges =
+        saveError !== null || saveQueueRef.current.pending !== null;
       if (!hasUnsavedChanges) return;
       e.preventDefault();
       e.returnValue = "";
@@ -287,9 +311,15 @@ export function ResumeEditor({
   // response already carries the final status.
   async function compileResume() {
     setCompiling(true);
-    setResume((cur) => ({ ...cur, compile_status: "compiling", compile_error: null }));
+    setResume((cur) => ({
+      ...cur,
+      compile_status: "compiling",
+      compile_error: null,
+    }));
     try {
-      const res = await fetch(`/api/resumes/${resume.id}/compile`, { method: "POST" });
+      const res = await fetch(`/api/resumes/${resume.id}/compile`, {
+        method: "POST",
+      });
       const body = (await res.json().catch(() => ({}))) as {
         compileStatus?: string;
         compileError?: string;
@@ -315,7 +345,11 @@ export function ResumeEditor({
       setPdfUrl(body.pdfUrl ?? null);
       setPdfDownloadUrl(body.pdfDownloadUrl ?? null);
     } catch {
-      setResume((cur) => ({ ...cur, compile_status: "failed", compile_error: "Compile request failed." }));
+      setResume((cur) => ({
+        ...cur,
+        compile_status: "failed",
+        compile_error: "Compile request failed.",
+      }));
     } finally {
       setCompiling(false);
     }
@@ -344,10 +378,16 @@ export function ResumeEditor({
   // Place `entry` into the section titled `targetSectionTitle` (created if it
   // doesn't exist yet), inserted just before `insertBeforeId` or appended at
   // the end.
-  function placeEntry(entry: BankEntryRow, targetSectionTitle: string, insertBeforeId?: string) {
+  function placeEntry(
+    entry: BankEntryRow,
+    targetSectionTitle: string,
+    insertBeforeId?: string,
+  ) {
     if (usedEntryIds.has(entry.id)) return;
 
-    const targetIndex = sections.findIndex((s) => s.title === targetSectionTitle);
+    const targetIndex = sections.findIndex(
+      (s) => s.title === targetSectionTitle,
+    );
     const target = targetIndex === -1 ? null : sections[targetIndex];
 
     // A section's title is its identity (see OutlinePane) — an entry can
@@ -355,7 +395,11 @@ export function ResumeEditor({
     // from, so an Education entry can't be dropped into an Experience
     // section just because that's where the pointer happened to be. Fails
     // silently (card just snaps back) rather than surfacing an error banner.
-    if (target && target.title.trim().toLowerCase() !== entry.source_section.trim().toLowerCase()) {
+    if (
+      target &&
+      target.title.trim().toLowerCase() !==
+        entry.source_section.trim().toLowerCase()
+    ) {
       return;
     }
 
@@ -364,21 +408,35 @@ export function ResumeEditor({
       return kind === "section_chunk" || kind === "header_chunk";
     });
 
-    if (target && (targetHasChunk || entry.kind === "section_chunk" || entry.kind === "header_chunk")) {
-      showAddError(`"${targetSectionTitle}" already holds a section that must stay by itself.`);
+    if (
+      target &&
+      (targetHasChunk ||
+        entry.kind === "section_chunk" ||
+        entry.kind === "header_chunk")
+    ) {
+      showAddError(
+        `"${targetSectionTitle}" already holds a section that must stay by itself.`,
+      );
       return;
     }
 
     if (target) {
       const nextEntries = [...target.entries];
-      const insertAt = insertBeforeId ? nextEntries.indexOf(insertBeforeId) : -1;
+      const insertAt = insertBeforeId
+        ? nextEntries.indexOf(insertBeforeId)
+        : -1;
       if (insertAt === -1) nextEntries.push(entry.id);
       else nextEntries.splice(insertAt, 0, entry.id);
       updateSections(
-        sections.map((s, i) => (i === targetIndex ? { ...s, entries: nextEntries } : s)),
+        sections.map((s, i) =>
+          i === targetIndex ? { ...s, entries: nextEntries } : s,
+        ),
       );
     } else {
-      updateSections([...sections, { title: targetSectionTitle, entries: [entry.id] }]);
+      updateSections([
+        ...sections,
+        { title: targetSectionTitle, entries: [entry.id] },
+      ]);
     }
   }
 
@@ -389,7 +447,9 @@ export function ResumeEditor({
   const [activeId, setActiveId] = useState<string | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
   );
 
   function handleDragStart(e: DragStartEvent) {
@@ -434,7 +494,8 @@ export function ResumeEditor({
     let toSectionIndex = findSectionIndexByEntryId(overIdStr);
     if (toSectionIndex === -1 && overIdStr.startsWith(SECTION_APPEND_PREFIX)) {
       toSectionIndex = sections.findIndex(
-        (section) => section.title === overIdStr.slice(SECTION_APPEND_PREFIX.length),
+        (section) =>
+          section.title === overIdStr.slice(SECTION_APPEND_PREFIX.length),
       );
     }
     if (toSectionIndex === -1) return;
@@ -454,7 +515,11 @@ export function ResumeEditor({
         const kind = entryById.get(id)?.kind;
         return kind === "section_chunk" || kind === "header_chunk";
       });
-      if (targetHasChunk || draggedEntry.kind === "section_chunk" || draggedEntry.kind === "header_chunk")
+      if (
+        targetHasChunk ||
+        draggedEntry.kind === "section_chunk" ||
+        draggedEntry.kind === "header_chunk"
+      )
         return;
 
       const next = sections.map((section) => ({
@@ -477,7 +542,9 @@ export function ResumeEditor({
     if (from === -1 || to === -1 || from === to) return;
     updateSections(
       sections.map((s, i) =>
-        i === fromSectionIndex ? { ...s, entries: arrayMove(s.entries, from, to) } : s,
+        i === fromSectionIndex
+          ? { ...s, entries: arrayMove(s.entries, from, to) }
+          : s,
       ),
     );
   }
@@ -486,7 +553,9 @@ export function ResumeEditor({
     ? entryById.get(activeId.slice(BANK_DRAG_PREFIX.length))
     : undefined;
   const activeOutlineEntry =
-    activeId && !activeId.startsWith(BANK_DRAG_PREFIX) ? entryById.get(activeId) : undefined;
+    activeId && !activeId.startsWith(BANK_DRAG_PREFIX)
+      ? entryById.get(activeId)
+      : undefined;
 
   // Adjustable bank/outline/preview split, two independent dividers. Clamped
   // so no pane can be dragged down to unusable — bounds are in percent of
@@ -494,8 +563,12 @@ export function ResumeEditor({
   // of window size.
   const [bankWidthPct, setBankWidthPct] = useState(38);
   const [previewWidthPct, setPreviewWidthPct] = useState(30);
-  const [resizingSplit, setResizingSplit] = useState<"bank" | "preview" | false>(false);
-  const [splitHovered, setSplitHovered] = useState<"bank" | "preview" | false>(false);
+  const [resizingSplit, setResizingSplit] = useState<
+    "bank" | "preview" | false
+  >(false);
+  const [splitHovered, setSplitHovered] = useState<"bank" | "preview" | false>(
+    false,
+  );
   const splitRowRef = useRef<HTMLDivElement>(null);
 
   function clampSplit(pct: number) {
@@ -513,7 +586,9 @@ export function ResumeEditor({
     if (resizingSplit === "bank") {
       setBankWidthPct(clampSplit(((e.clientX - rect.left) / rect.width) * 100));
     } else {
-      setPreviewWidthPct(clampSplit(((rect.right - e.clientX) / rect.width) * 100));
+      setPreviewWidthPct(
+        clampSplit(((rect.right - e.clientX) / rect.width) * 100),
+      );
     }
   }
   function onSplitPointerUp(e: PointerEvent<HTMLDivElement>) {
@@ -537,7 +612,9 @@ export function ResumeEditor({
             void renameResume(title);
           }}
         />
-        {addError && <span className="px-2 text-[11.5px] text-danger">{addError}</span>}
+        {addError && (
+          <span className="px-2 text-[11.5px] text-danger">{addError}</span>
+        )}
         {saveError && (
           <span className="flex items-center gap-2 px-2 text-[11.5px] text-danger">
             {saveError}
@@ -559,8 +636,14 @@ export function ResumeEditor({
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
-        <div ref={splitRowRef} className={`flex min-h-0 flex-1 ${resizingSplit ? "cursor-col-resize select-none" : ""}`}>
-          <div className="min-h-0 min-w-[15%]" style={{ width: `${bankWidthPct}%` }}>
+        <div
+          ref={splitRowRef}
+          className={`flex min-h-0 flex-1 ${resizingSplit ? "cursor-col-resize select-none" : ""}`}
+        >
+          <div
+            className="min-h-0 min-w-[15%]"
+            style={{ width: `${bankWidthPct}%` }}
+          >
             <BankPane
               entries={entries}
               usedEntryIds={usedEntryIds}
@@ -573,9 +656,15 @@ export function ResumeEditor({
                     e.id === id
                       ? {
                           ...e,
-                          ...(values.displayName !== undefined ? { display_name: values.displayName } : {}),
-                          ...(values.tags !== undefined ? { tags: values.tags } : {}),
-                          ...(values.rawLatex !== undefined ? { raw_latex: values.rawLatex } : {}),
+                          ...(values.displayName !== undefined
+                            ? { display_name: values.displayName }
+                            : {}),
+                          ...(values.tags !== undefined
+                            ? { tags: values.tags }
+                            : {}),
+                          ...(values.rawLatex !== undefined
+                            ? { raw_latex: values.rawLatex }
+                            : {}),
                         }
                       : e,
                   ),
@@ -590,7 +679,9 @@ export function ResumeEditor({
             onPointerDown={onSplitPointerDown("bank")}
             onPointerMove={onSplitPointerMove}
             onPointerUp={onSplitPointerUp}
-            onHoverChange={(hovered) => setSplitHovered(hovered ? "bank" : false)}
+            onHoverChange={(hovered) =>
+              setSplitHovered(hovered ? "bank" : false)
+            }
           />
           <div className="min-h-0 min-w-[15%] flex-1">
             <OutlinePane
@@ -607,9 +698,14 @@ export function ResumeEditor({
             onPointerDown={onSplitPointerDown("preview")}
             onPointerMove={onSplitPointerMove}
             onPointerUp={onSplitPointerUp}
-            onHoverChange={(hovered) => setSplitHovered(hovered ? "preview" : false)}
+            onHoverChange={(hovered) =>
+              setSplitHovered(hovered ? "preview" : false)
+            }
           />
-          <div className="min-h-0 min-w-[15%]" style={{ width: `${previewWidthPct}%` }}>
+          <div
+            className="min-h-0 min-w-[15%]"
+            style={{ width: `${previewWidthPct}%` }}
+          >
             <PreviewPane
               compileStatus={resume.compile_status}
               compileError={resume.compile_error}

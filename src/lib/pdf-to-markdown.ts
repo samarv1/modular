@@ -10,7 +10,9 @@ function functionBaseUrl(): string {
 
 export class PdfToMarkdownError extends Error {}
 
-export async function convertPdfToMarkdown(pdfBytes: Uint8Array): Promise<string> {
+export async function convertPdfToMarkdown(
+  pdfBytes: Uint8Array,
+): Promise<string> {
   const headers: Record<string, string> = { "Content-Type": "application/pdf" };
   // Two separate gates in front of this route, both need bypassing here:
   // Vercel Authentication (project-wide SSO protection, in front of
@@ -18,7 +20,8 @@ export async function convertPdfToMarkdown(pdfBytes: Uint8Array): Promise<string
   // excluded from src/proxy.ts's Supabase-session check since this call has
   // no browser session to carry — see the comment there for why).
   if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
-    headers["x-vercel-protection-bypass"] = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+    headers["x-vercel-protection-bypass"] =
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
   }
   if (process.env.PDF_TO_MARKDOWN_SECRET) {
     headers["X-Internal-Secret"] = process.env.PDF_TO_MARKDOWN_SECRET;
@@ -35,7 +38,8 @@ export async function convertPdfToMarkdown(pdfBytes: Uint8Array): Promise<string
 
   const payload = await response.json().catch(() => null);
   if (!response.ok || !payload || typeof payload.markdown !== "string") {
-    const reason = payload?.error ?? `pdf-to-markdown function returned ${response.status}`;
+    const reason =
+      payload?.error ?? `pdf-to-markdown function returned ${response.status}`;
     throw new PdfToMarkdownError(reason);
   }
   return payload.markdown;

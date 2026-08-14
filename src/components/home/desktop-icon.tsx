@@ -30,7 +30,9 @@ export function DesktopIconSlot({
         position: "absolute",
         left: x,
         top: y,
-        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+        transform: transform
+          ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
+          : undefined,
         zIndex: isDragging ? 10 : undefined,
       }}
       className="flex w-32 touch-none select-none flex-col items-center gap-1"

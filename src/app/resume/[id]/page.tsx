@@ -25,7 +25,10 @@ export default async function ResumePage({
   if (!composition) notFound();
 
   const ownerId = await getOwnerId();
-  const { data: entryData, error: entryError } = await ownerScopedTable("bank_entry", ownerId)
+  const { data: entryData, error: entryError } = await ownerScopedTable(
+    "bank_entry",
+    ownerId,
+  )
     .select(
       "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
     )
@@ -36,7 +39,9 @@ export default async function ResumePage({
   const [pdfUrl, pdfDownloadUrl] = pdfPath
     ? await Promise.all([
         getSignedUrl(pdfPath),
-        getSignedUrl(pdfPath, 3600, { download: resumeDownloadFilename(composition.resume.title) }),
+        getSignedUrl(pdfPath, 3600, {
+          download: resumeDownloadFilename(composition.resume.title),
+        }),
       ])
     : [null, null];
 

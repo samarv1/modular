@@ -6,7 +6,10 @@ import {
   parseSectionChunkLines,
   readBalancedArgs,
 } from "@/lib/jake-entry-preview";
-import { HeaderDataSchema, type ExtractedEntry } from "@/lib/resume-extraction-schema";
+import {
+  HeaderDataSchema,
+  type ExtractedEntry,
+} from "@/lib/resume-extraction-schema";
 import type { z } from "zod";
 
 // Narrower than BankEntryRow (only the fields these converters actually
@@ -28,12 +31,15 @@ type RawEntrySource = {
 // handled — anything else falls back to an empty, title-only shell rather
 // than throwing, since a malformed/legacy entry should still open for
 // editing.
-export function bankEntryToExtractedEntry(entry: RawEntrySource): ExtractedEntry {
+export function bankEntryToExtractedEntry(
+  entry: RawEntrySource,
+): ExtractedEntry {
   const { kind, source_section: sourceSection, raw_latex: rawLatex } = entry;
 
   if (kind === "subheading_entry") {
     const idx = rawLatex.indexOf("\\resumeSubheading");
-    if (idx === -1) return { kind, sourceSection, title: entry.display_name, bullets: [] };
+    if (idx === -1)
+      return { kind, sourceSection, title: entry.display_name, bullets: [] };
     const [title, date, organization, location] = readBalancedArgs(
       rawLatex.slice(idx + "\\resumeSubheading".length),
       4,
@@ -51,13 +57,21 @@ export function bankEntryToExtractedEntry(entry: RawEntrySource): ExtractedEntry
 
   if (kind === "project_entry") {
     const idx = rawLatex.indexOf("\\resumeProjectHeading");
-    if (idx === -1) return { kind, sourceSection, title: entry.display_name, bullets: [] };
+    if (idx === -1)
+      return { kind, sourceSection, title: entry.display_name, bullets: [] };
     const [titleLine, date] = readBalancedArgs(
       rawLatex.slice(idx + "\\resumeProjectHeading".length),
       2,
     );
     const { title, meta: stack } = parseProjectTitle(titleLine);
-    return { kind, sourceSection, title, date: cleanLatexText(date), stack, bullets: extractItems(rawLatex) };
+    return {
+      kind,
+      sourceSection,
+      title,
+      date: cleanLatexText(date),
+      stack,
+      bullets: extractItems(rawLatex),
+    };
   }
 
   if (kind === "section_chunk") {

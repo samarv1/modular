@@ -24,10 +24,15 @@ export default async function Home() {
         "id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at",
       )
       .order("created_at", { ascending: true }),
-    ownerScopedTable("template_shell", ownerId).select("id").limit(1).maybeSingle(),
+    ownerScopedTable("template_shell", ownerId)
+      .select("id")
+      .limit(1)
+      .maybeSingle(),
   ]);
-  if (folderError) throw new Error((folderError as { message: string }).message);
-  if (resumeError) throw new Error((resumeError as { message: string }).message);
+  if (folderError)
+    throw new Error((folderError as { message: string }).message);
+  if (resumeError)
+    throw new Error((resumeError as { message: string }).message);
 
   // Gates the "New resume" (blank) affordance — POST /api/resumes 422s with
   // no template shell yet, which only happens before the first ZIP import.

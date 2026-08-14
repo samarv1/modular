@@ -28,7 +28,9 @@ export function HeaderFieldsEditor({
 }) {
   return (
     <div className="flex flex-col gap-2 rounded-md border border-line-strong p-2.5">
-      <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-fg">Name & Contact</div>
+      <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-fg">
+        Name & Contact
+      </div>
       <input
         value={header.name}
         onChange={(e) => onChange({ name: e.target.value })}
@@ -90,7 +92,9 @@ export function EntryEditor({
               </div>
               <textarea
                 value={bulletsToText(entry.bullets ?? [])}
-                onChange={(e) => onChange({ bullets: textToBullets(e.target.value) })}
+                onChange={(e) =>
+                  onChange({ bullets: textToBullets(e.target.value) })
+                }
                 placeholder="One bullet per line"
                 rows={Math.max(2, entry.bullets?.length ?? 2)}
                 className="min-w-0 resize-y rounded-sm border border-line-strong bg-transparent p-1.5 text-[11.5px] outline-none focus:border-brand"
@@ -121,7 +125,9 @@ export function EntryEditor({
               />
               <textarea
                 value={bulletsToText(entry.bullets ?? [])}
-                onChange={(e) => onChange({ bullets: textToBullets(e.target.value) })}
+                onChange={(e) =>
+                  onChange({ bullets: textToBullets(e.target.value) })
+                }
                 placeholder="One bullet per line"
                 rows={Math.max(2, entry.bullets?.length ?? 2)}
                 className="min-w-0 resize-y rounded-sm border border-line-strong bg-transparent p-1.5 text-[11.5px] outline-none focus:border-brand"
@@ -131,7 +137,9 @@ export function EntryEditor({
           {entry.kind === "section_chunk" && (
             <textarea
               value={(entry.items ?? []).join("\n")}
-              onChange={(e) => onChange({ items: textToBullets(e.target.value) })}
+              onChange={(e) =>
+                onChange({ items: textToBullets(e.target.value) })
+              }
               placeholder="Category: values (one per line)"
               rows={Math.max(2, entry.items?.length ?? 2)}
               className="min-w-0 resize-y rounded-sm border border-line-strong bg-transparent p-1.5 text-[11.5px] outline-none focus:border-brand"

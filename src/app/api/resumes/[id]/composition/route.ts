@@ -11,12 +11,18 @@ import { isUuid, readJsonObject } from "@/lib/api-request";
 // field). The client sends the whole ordered section/entry tree on every
 // change; the RPC in 0002_composition_rpc.sql does the delete+reinsert as
 // one transaction rather than the API layer doing it as two calls.
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const { id } = await params;
   const body = await readJsonObject(request);
 
   if (!body || !Array.isArray(body.sections)) {
-    return NextResponse.json({ error: "sections must be an array" }, { status: 400 });
+    return NextResponse.json(
+      { error: "sections must be an array" },
+      { status: 400 },
+    );
   }
 
   const sections: CompositionSectionInput[] = [];
@@ -24,10 +30,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const seenEntryIds = new Set<string>();
   for (const raw of body.sections) {
     if (typeof raw?.title !== "string" || !raw.title.trim()) {
-      return NextResponse.json({ error: "each section needs a title" }, { status: 400 });
+      return NextResponse.json(
+        { error: "each section needs a title" },
+        { status: 400 },
+      );
     }
-    if (!Array.isArray(raw.entries) || !raw.entries.every((e: unknown) => typeof e === "string")) {
-      return NextResponse.json({ error: "section entries must be an array of ids" }, { status: 400 });
+    if (
+      !Array.isArray(raw.entries) ||
+      !raw.entries.every((e: unknown) => typeof e === "string")
+    ) {
+      return NextResponse.json(
+        { error: "section entries must be an array of ids" },
+        { status: 400 },
+      );
     }
     if (seenTitles.has(raw.title)) {
       return NextResponse.json(
@@ -38,7 +53,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     seenTitles.add(raw.title);
     for (const entryId of raw.entries) {
       if (!isUuid(entryId)) {
-        return NextResponse.json({ error: "entry ids must be UUIDs" }, { status: 400 });
+        return NextResponse.json(
+          { error: "entry ids must be UUIDs" },
+          { status: 400 },
+        );
       }
       if (seenEntryIds.has(entryId)) {
         return NextResponse.json(
@@ -55,7 +73,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     await setResumeComposition(id, sections);
   } catch (err) {
     if (err instanceof CompositionError) {
-      return NextResponse.json({ error: err.message }, { status: compositionErrorStatus(err.code) });
+      return NextResponse.json(
+        { error: err.message },
+        { status: compositionErrorStatus(err.code) },
+      );
     }
     throw err;
   }

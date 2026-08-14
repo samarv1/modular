@@ -10,7 +10,7 @@ describe("readJsonObject", () => {
     await expect(readJsonObject(request)).resolves.toEqual({ title: "Resume" });
   });
 
-  it.each(["null", "[]", "\"text\"", "{"])(
+  it.each(["null", "[]", '"text"', "{"])(
     "rejects a non-object or malformed body: %s",
     async (body) => {
       const request = new Request("http://localhost", { method: "POST", body });

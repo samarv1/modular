@@ -1,5 +1,8 @@
 import { CANONICAL_JAKE_PREAMBLE } from "./adapters/jakes-resume-v1/canonical-preamble";
-import type { ExtractedEntry, ResumeExtraction } from "./resume-extraction-schema";
+import type {
+  ExtractedEntry,
+  ResumeExtraction,
+} from "./resume-extraction-schema";
 
 // Deterministic inverse of the ESCAPES table in jake-entry-preview.ts: turns
 // plain extracted text back into LaTeX-safe text. A single character-by-
@@ -46,7 +49,9 @@ export function escapeLatex(text: string): string {
 
 function renderBullets(bullets: string[]): string {
   if (bullets.length === 0) return "";
-  const items = bullets.map((bullet) => `        \\resumeItem{${escapeLatex(bullet)}}`).join("\n");
+  const items = bullets
+    .map((bullet) => `        \\resumeItem{${escapeLatex(bullet)}}`)
+    .join("\n");
   return `\n      \\resumeItemListStart\n${items}\n      \\resumeItemListEnd`;
 }
 
@@ -115,7 +120,10 @@ export function renderHeader(header: ResumeExtraction["header"]): string {
 // as a real uploaded .tex file (see src/app/api/imports/route.ts).
 export function synthesizeJakeLatex(extraction: ResumeExtraction): string {
   const sections = extraction.sections
-    .map((section) => `\\section{${escapeLatex(section.title)}}\n${renderSectionBody(section.entries)}`)
+    .map(
+      (section) =>
+        `\\section{${escapeLatex(section.title)}}\n${renderSectionBody(section.entries)}`,
+    )
     .join("\n\n\n");
 
   const body = [renderHeader(extraction.header), sections].join("\n\n\n");

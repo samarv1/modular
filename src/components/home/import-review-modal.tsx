@@ -11,8 +11,14 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { sectionGroupLabel } from "@/lib/section-label";
-import { EntryEditor, HeaderFieldsEditor } from "@/components/bank/entry-editor";
-import { bankEntryToExtractedEntry, bankEntryToHeaderData } from "@/lib/bank-entry-fields";
+import {
+  EntryEditor,
+  HeaderFieldsEditor,
+} from "@/components/bank/entry-editor";
+import {
+  bankEntryToExtractedEntry,
+  bankEntryToHeaderData,
+} from "@/lib/bank-entry-fields";
 import type { ExtractedEntry } from "@/lib/resume-extraction-schema";
 import type { BankEntryRow } from "@/lib/rows";
 import { UploadZone } from "@/components/home/upload-zone";
@@ -58,17 +64,26 @@ export function ImportReviewModal({
   const [file, setFile] = useState<File | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [mismatchReport, setMismatchReport] = useState<{ reason: string; details: string[] } | null>(
-    null,
-  );
+  const [mismatchReport, setMismatchReport] = useState<{
+    reason: string;
+    details: string[];
+  } | null>(null);
   const [entries, setEntries] = useState<PreviewEntry[]>([]);
   const [removedIndices, setRemovedIndices] = useState<Set<number>>(new Set());
-  const [entryDrafts, setEntryDrafts] = useState<Record<string, ExtractedEntry>>({});
-  const [initialDrafts, setInitialDrafts] = useState<Record<string, ExtractedEntry>>({});
-  const [headerDraft, setHeaderDraft] = useState<{ name: string; contactLine: string } | null>(null);
-  const [initialHeaderDraft, setInitialHeaderDraft] = useState<{ name: string; contactLine: string } | null>(
-    null,
-  );
+  const [entryDrafts, setEntryDrafts] = useState<
+    Record<string, ExtractedEntry>
+  >({});
+  const [initialDrafts, setInitialDrafts] = useState<
+    Record<string, ExtractedEntry>
+  >({});
+  const [headerDraft, setHeaderDraft] = useState<{
+    name: string;
+    contactLine: string;
+  } | null>(null);
+  const [initialHeaderDraft, setInitialHeaderDraft] = useState<{
+    name: string;
+    contactLine: string;
+  } | null>(null);
 
   function reset() {
     setPhase("idle");
@@ -119,7 +134,9 @@ export function ImportReviewModal({
         setRemovedIndices(new Set());
 
         const header = loaded.find((e) => e.kind === "header_chunk") ?? null;
-        const header0 = header ? bankEntryToHeaderData({ raw_latex: header.rawLatex }) : null;
+        const header0 = header
+          ? bankEntryToHeaderData({ raw_latex: header.rawLatex })
+          : null;
         setHeaderDraft(header0);
         setInitialHeaderDraft(header0);
 
@@ -147,7 +164,11 @@ export function ImportReviewModal({
         setPhase("mismatch");
         return;
       }
-      setErrorMessage(typeof body?.error === "string" ? body.error : "could not read that file");
+      setErrorMessage(
+        typeof body?.error === "string"
+          ? body.error
+          : "could not read that file",
+      );
       setPhase("idle");
     } catch {
       setErrorMessage("could not read that file");
@@ -165,7 +186,10 @@ export function ImportReviewModal({
   }
 
   function updateEntryDraft(key: string, patch: Partial<ExtractedEntry>) {
-    setEntryDrafts((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } as ExtractedEntry }));
+    setEntryDrafts((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], ...patch } as ExtractedEntry,
+    }));
   }
 
   const visibleEntries = entries.filter((e) => !removedIndices.has(e.index));
@@ -173,7 +197,9 @@ export function ImportReviewModal({
   // above the sections, no Remove button), so it's left out of these counts,
   // otherwise "Approve (N)" and the summary line's entry count would
   // include something not listed in any section.
-  const nonHeaderEntries = visibleEntries.filter((e) => e.kind !== "header_chunk");
+  const nonHeaderEntries = visibleEntries.filter(
+    (e) => e.kind !== "header_chunk",
+  );
 
   // Grouped by section, in first-appearance order, header entry excluded
   // (rendered separately via HeaderFieldsEditor, same as EditSourceResumeBody
@@ -189,7 +215,10 @@ export function ImportReviewModal({
       }
       byLabel.get(entry.sourceSection)!.push(entry);
     }
-    return order.map((label): [string, PreviewEntry[]] => [label, byLabel.get(label)!]);
+    return order.map((label): [string, PreviewEntry[]] => [
+      label,
+      byLabel.get(label)!,
+    ]);
   }, [nonHeaderEntries]);
 
   async function commitImport() {
@@ -205,11 +234,17 @@ export function ImportReviewModal({
           touched = true;
         }
         if (entry.kind === "header_chunk") {
-          if (headerDraft && JSON.stringify(headerDraft) !== JSON.stringify(initialHeaderDraft)) {
+          if (
+            headerDraft &&
+            JSON.stringify(headerDraft) !== JSON.stringify(initialHeaderDraft)
+          ) {
             patch.headerFields = headerDraft;
             touched = true;
           }
-        } else if (JSON.stringify(entryDrafts[entry.key]) !== JSON.stringify(initialDrafts[entry.key])) {
+        } else if (
+          JSON.stringify(entryDrafts[entry.key]) !==
+          JSON.stringify(initialDrafts[entry.key])
+        ) {
           patch.entryFields = entryDrafts[entry.key];
           touched = true;
         }
@@ -220,7 +255,8 @@ export function ImportReviewModal({
       const form = new FormData();
       form.set("file", file);
       form.set("mode", "commit");
-      if (overrides.length > 0) form.set("overrides", JSON.stringify(overrides));
+      if (overrides.length > 0)
+        form.set("overrides", JSON.stringify(overrides));
       const res = await fetch("/api/imports", { method: "POST", body: form });
       const body = await res.json().catch(() => null);
       if (res.ok && body?.compatible) {
@@ -228,7 +264,11 @@ export function ImportReviewModal({
         close();
         return;
       }
-      setErrorMessage(typeof body?.error === "string" ? body.error : "upload failed, try again");
+      setErrorMessage(
+        typeof body?.error === "string"
+          ? body.error
+          : "upload failed, try again",
+      );
       setPhase("review");
     } catch {
       setErrorMessage("upload failed, try again");
@@ -246,7 +286,10 @@ export function ImportReviewModal({
         if (!next) reset();
       }}
     >
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[640px]" showCloseButton={phase !== "committing"}>
+      <DialogContent
+        className="flex max-h-[85vh] flex-col sm:max-w-[640px]"
+        showCloseButton={phase !== "committing"}
+      >
         <DialogHeader>
           <DialogTitle>
             {editSourceResume
@@ -270,8 +313,15 @@ export function ImportReviewModal({
           <>
             {phase === "idle" && (
               <div className="flex flex-col gap-2">
-                <UploadZone onFileSelected={handleFileSelected} onRejected={setErrorMessage} />
-                {errorMessage && <span className="text-[11.5px] text-danger">{errorMessage}</span>}
+                <UploadZone
+                  onFileSelected={handleFileSelected}
+                  onRejected={setErrorMessage}
+                />
+                {errorMessage && (
+                  <span className="text-[11.5px] text-danger">
+                    {errorMessage}
+                  </span>
+                )}
               </div>
             )}
 
@@ -304,7 +354,11 @@ export function ImportReviewModal({
                     </ul>
                   )}
                 </div>
-                <Button variant="outline" onClick={reset} className="self-start">
+                <Button
+                  variant="outline"
+                  onClick={reset}
+                  className="self-start"
+                >
                   Try another file
                 </Button>
               </div>
@@ -331,7 +385,9 @@ export function ImportReviewModal({
                   {headerDraft && (
                     <HeaderFieldsEditor
                       header={headerDraft}
-                      onChange={(patch) => setHeaderDraft({ ...headerDraft, ...patch })}
+                      onChange={(patch) =>
+                        setHeaderDraft({ ...headerDraft, ...patch })
+                      }
                     />
                   )}
                   {groups.map(([label, groupEntries]) => (
@@ -343,7 +399,9 @@ export function ImportReviewModal({
                         <EntryEditor
                           key={entry.key}
                           entry={entryDrafts[entry.key]}
-                          onChange={(patch) => updateEntryDraft(entry.key, patch)}
+                          onChange={(patch) =>
+                            updateEntryDraft(entry.key, patch)
+                          }
                           onRemove={() => removeEntry(entry)}
                         />
                       ))}
@@ -351,15 +409,25 @@ export function ImportReviewModal({
                   ))}
                 </div>
 
-                {errorMessage && <span className="text-[11.5px] text-danger">{errorMessage}</span>}
+                {errorMessage && (
+                  <span className="text-[11.5px] text-danger">
+                    {errorMessage}
+                  </span>
+                )}
 
                 <DialogFooter>
-                  <Button variant="outline" onClick={close} disabled={phase === "committing"}>
+                  <Button
+                    variant="outline"
+                    onClick={close}
+                    disabled={phase === "committing"}
+                  >
                     Cancel
                   </Button>
                   <Button
                     onClick={commitImport}
-                    disabled={phase === "committing" || nonHeaderEntries.length === 0}
+                    disabled={
+                      phase === "committing" || nonHeaderEntries.length === 0
+                    }
                   >
                     {phase === "committing" ? (
                       <Loader2 className="size-3.5 animate-spin" />
@@ -376,4 +444,3 @@ export function ImportReviewModal({
     </Dialog>
   );
 }
-

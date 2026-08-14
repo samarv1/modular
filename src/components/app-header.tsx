@@ -17,7 +17,9 @@ export function AppHeader() {
 
   return (
     <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-      <span className="font-mono text-lg font-semibold uppercase tracking-tight">Modular</span>
+      <span className="font-mono text-lg font-semibold uppercase tracking-tight">
+        Modular
+      </span>
       <Button variant="ghost" size="sm" onClick={signOut}>
         Sign out
       </Button>

@@ -3,6 +3,10 @@
 // Content-Disposition, not for the inline preview URL (which stays
 // untitled/anonymous).
 export function resumeDownloadFilename(title: string, ext = "pdf"): string {
-  const cleaned = title.trim().replace(/[/\\:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim();
+  const cleaned = title
+    .trim()
+    .replace(/[/\\:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
   return `${cleaned || "resume"}.${ext}`;
 }

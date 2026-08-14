@@ -2,14 +2,21 @@
 
 import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown, ChevronUp, GripVertical, Plus, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
 import { sectionGroupLabel } from "@/lib/section-label";
 import type { BankEntryRow } from "@/lib/rows";
-import { NEW_SECTION_DROP_ID, SECTION_APPEND_PREFIX } from "@/components/dnd-ids";
+import {
+  NEW_SECTION_DROP_ID,
+  SECTION_APPEND_PREFIX,
+} from "@/components/dnd-ids";
 
 export interface EditorSection {
   title: string;
@@ -37,7 +44,11 @@ export function OutlinePane({
 }) {
   function removeEntry(sectionTitle: string, entryId: string) {
     const next = sections
-      .map((s) => (s.title === sectionTitle ? { ...s, entries: s.entries.filter((id) => id !== entryId) } : s))
+      .map((s) =>
+        s.title === sectionTitle
+          ? { ...s, entries: s.entries.filter((id) => id !== entryId) }
+          : s,
+      )
       .filter((s) => s.entries.length > 0);
     onChange(next);
   }
@@ -69,15 +80,26 @@ export function OutlinePane({
               onRemove={removeEntry}
               blocked={
                 draggedEntry !== undefined &&
-                draggedEntry.source_section.trim().toLowerCase() !== section.title.trim().toLowerCase()
+                draggedEntry.source_section.trim().toLowerCase() !==
+                  section.title.trim().toLowerCase()
               }
-              onMoveUp={index > 0 ? () => moveSection(section.title, "up") : undefined}
-              onMoveDown={index < sections.length - 1 ? () => moveSection(section.title, "down") : undefined}
+              onMoveUp={
+                index > 0 ? () => moveSection(section.title, "up") : undefined
+              }
+              onMoveDown={
+                index < sections.length - 1
+                  ? () => moveSection(section.title, "down")
+                  : undefined
+              }
             />
           ))}
           <DropBox
             id={NEW_SECTION_DROP_ID}
-            label={sections.length === 0 ? "Drop here to start building this resume" : "Add a new section"}
+            label={
+              sections.length === 0
+                ? "Drop here to start building this resume"
+                : "Add a new section"
+            }
           />
         </div>
       </ScrollArea>
@@ -129,7 +151,10 @@ function OutlineSection({
           </button>
         </div>
       </div>
-      <SortableContext items={section.entries} strategy={verticalListSortingStrategy}>
+      <SortableContext
+        items={section.entries}
+        strategy={verticalListSortingStrategy}
+      >
         <div className="flex flex-col gap-1.5">
           {section.entries.map((entryId) => (
             <OutlineEntry
@@ -181,7 +206,9 @@ function DropBox({
       }`}
     >
       <Plus className="size-3" />
-      {label && <span className="font-mono uppercase tracking-wide">{label}</span>}
+      {label && (
+        <span className="font-mono uppercase tracking-wide">{label}</span>
+      )}
     </div>
   );
 }
@@ -198,7 +225,14 @@ function OutlineEntry({
   onRemove: (sectionTitle: string, entryId: string) => void;
 }) {
   const [hovering, setHovering] = useState(false);
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
     id: entryId,
   });
   const style = {

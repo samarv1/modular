@@ -15,7 +15,10 @@ if (!dbUrl) {
   process.exit(1);
 }
 
-const client = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
+const client = new pg.Client({
+  connectionString: dbUrl,
+  ssl: { rejectUnauthorized: false },
+});
 
 const files = readdirSync(migrationsDir)
   .filter((f) => f.endsWith(".sql"))

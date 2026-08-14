@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEvent,
+} from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { Pencil, GripVertical, Upload as UploadIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -14,8 +20,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { EntryEditor, HeaderFieldsEditor } from "@/components/bank/entry-editor";
-import { bankEntryToExtractedEntry, bankEntryToHeaderData } from "@/lib/bank-entry-fields";
+import {
+  EntryEditor,
+  HeaderFieldsEditor,
+} from "@/components/bank/entry-editor";
+import {
+  bankEntryToExtractedEntry,
+  bankEntryToHeaderData,
+} from "@/lib/bank-entry-fields";
 import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
 import { sectionGroupLabel } from "@/lib/section-label";
 import type { ExtractedEntry } from "@/lib/resume-extraction-schema";
@@ -28,14 +40,21 @@ import { ImportReviewModal } from "@/components/home/import-review-modal";
 // fragment. Falls back to a short id for orphaned entries (source_resume_id
 // is ON DELETE SET NULL, see 0001_init.sql) or entries imported before
 // source_resume.display_name existed (0004 migration, backfilled as null).
-const GROUP_PRIORITY = ["name & contact", "education", "experience", "leadership", "projects"];
+const GROUP_PRIORITY = [
+  "name & contact",
+  "education",
+  "experience",
+  "leadership",
+  "projects",
+];
 function groupPriority(label: string) {
   const index = GROUP_PRIORITY.indexOf(label.trim().toLowerCase());
   return index === -1 ? GROUP_PRIORITY.length : index;
 }
 
 function resumeSourceLabel(entry: BankEntryRow): string {
-  if (entry.source_resume?.display_name) return entry.source_resume.display_name;
+  if (entry.source_resume?.display_name)
+    return entry.source_resume.display_name;
   if (!entry.source_resume_id) return "source unavailable"; // orphaned entry, see PLAN.md
   return entry.source_resume_id.slice(0, 6);
 }
@@ -54,7 +73,10 @@ export function BankPane({
   usedEntryIds: Set<string>;
   // Mirrors a display-name/tags edit up to the parent so the outline pane
   // and bank pane render from the same canonical entry state.
-  onEntryPatched?: (id: string, values: { displayName?: string; tags?: string[]; rawLatex?: string }) => void;
+  onEntryPatched?: (
+    id: string,
+    values: { displayName?: string; tags?: string[]; rawLatex?: string },
+  ) => void;
   onEntriesImported?: (entries: BankEntryRow[]) => void;
 }) {
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
@@ -86,7 +108,10 @@ export function BankPane({
       .sort(([a], [b]) => groupPriority(a) - groupPriority(b));
   }, [entries, usedEntryIds]);
 
-  async function patchEntry(id: string, values: { displayName?: string; tags?: string[] }) {
+  async function patchEntry(
+    id: string,
+    values: { displayName?: string; tags?: string[] },
+  ) {
     const previous = entries.find((entry) => entry.id === id);
     if (!previous) return;
     const version = (patchVersions.current.get(id) ?? 0) + 1;
@@ -122,7 +147,9 @@ export function BankPane({
     <div className="flex h-full flex-col gap-3 p-4">
       <div className="flex items-center justify-between gap-2">
         {entryError ? (
-          <span className="truncate text-[11.5px] text-danger">{entryError}</span>
+          <span className="truncate text-[11.5px] text-danger">
+            {entryError}
+          </span>
         ) : (
           <span />
         )}
@@ -204,8 +231,12 @@ function EntryEditDialog({
   onSaved: (values: { displayName?: string; rawLatex?: string }) => void;
 }) {
   const isHeader = entry.kind === "header_chunk";
-  const [headerDraft, setHeaderDraft] = useState(() => bankEntryToHeaderData(entry));
-  const [entryDraft, setEntryDraft] = useState<ExtractedEntry>(() => bankEntryToExtractedEntry(entry));
+  const [headerDraft, setHeaderDraft] = useState(() =>
+    bankEntryToHeaderData(entry),
+  );
+  const [entryDraft, setEntryDraft] = useState<ExtractedEntry>(() =>
+    bankEntryToExtractedEntry(entry),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -216,15 +247,26 @@ function EntryEditDialog({
       const res = await fetch(`/api/entries/${entry.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(isHeader ? { header: headerDraft } : { entry: entryDraft }),
+        body: JSON.stringify(
+          isHeader ? { header: headerDraft } : { entry: entryDraft },
+        ),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(typeof body?.error === "string" ? body.error : "could not save this entry");
+        throw new Error(
+          typeof body?.error === "string"
+            ? body.error
+            : "could not save this entry",
+        );
       }
-      onSaved({ displayName: body?.entry?.display_name, rawLatex: body?.entry?.raw_latex });
+      onSaved({
+        displayName: body?.entry?.display_name,
+        rawLatex: body?.entry?.raw_latex,
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "could not save this entry");
+      setError(
+        err instanceof Error ? err.message : "could not save this entry",
+      );
       setSaving(false);
     }
   }
@@ -237,16 +279,23 @@ function EntryEditDialog({
             {sectionGroupLabel(entry.source_section)}
           </span>
         </DialogTitle>
-        <DialogDescription className="sr-only">Edit {entry.display_name}</DialogDescription>
+        <DialogDescription className="sr-only">
+          Edit {entry.display_name}
+        </DialogDescription>
       </DialogHeader>
 
       {isHeader ? (
         <HeaderFieldsEditor
           header={headerDraft}
-          onChange={(patch) => setHeaderDraft((prev) => ({ ...prev, ...patch }))}
+          onChange={(patch) =>
+            setHeaderDraft((prev) => ({ ...prev, ...patch }))
+          }
         />
       ) : (
-        <EntryEditor entry={entryDraft} onChange={(patch) => setEntryDraft((prev) => ({ ...prev, ...patch }))} />
+        <EntryEditor
+          entry={entryDraft}
+          onChange={(patch) => setEntryDraft((prev) => ({ ...prev, ...patch }))}
+        />
       )}
 
       {error && <span className="text-[11.5px] text-danger">{error}</span>}
@@ -265,11 +314,16 @@ function EntryEditDialog({
 // like the card it came from, instead of jumping to a different style.
 export function BankEntryCardVisual({ entry }: { entry: BankEntryRow }) {
   return (
-    <Card size="sm" className="z-20 cursor-grabbing shadow-[4px_7px_14px_-2px_rgba(18,24,28,0.28)]">
+    <Card
+      size="sm"
+      className="z-20 cursor-grabbing shadow-[4px_7px_14px_-2px_rgba(18,24,28,0.28)]"
+    >
       <CardContent className="flex flex-row items-start gap-2">
         <GripVertical className="mt-0.5 size-3.5 shrink-0 text-line-strong" />
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <span className="w-fit text-[12.5px] font-semibold">{entry.display_name}</span>
+          <span className="w-fit text-[12.5px] font-semibold">
+            {entry.display_name}
+          </span>
           <div className="font-mono text-[10px] text-faint">
             {resumeSourceLabel(entry)}
           </div>
@@ -285,7 +339,10 @@ function EntryCard({
   onOpenEdit,
 }: {
   entry: BankEntryRow;
-  onPatch: (id: string, values: { displayName?: string; tags?: string[] }) => void;
+  onPatch: (
+    id: string,
+    values: { displayName?: string; tags?: string[] },
+  ) => void;
   onOpenEdit: () => void;
 }) {
   const [editingName, setEditingName] = useState(false);
@@ -305,7 +362,8 @@ function EntryCard({
       setName(entry.display_name);
       return;
     }
-    if (trimmed !== entry.display_name) onPatch(entry.id, { displayName: trimmed });
+    if (trimmed !== entry.display_name)
+      onPatch(entry.id, { displayName: trimmed });
   }
 
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -315,7 +373,8 @@ function EntryCard({
   function onPointerDownGuarded(e: PointerEvent<HTMLDivElement>) {
     // Don't hijack typing in the name-edit input, or the edit button's own
     // click — everything else on the card can start a drag.
-    if (e.target instanceof HTMLElement && e.target.closest("input, button")) return;
+    if (e.target instanceof HTMLElement && e.target.closest("input, button"))
+      return;
     listeners?.onPointerDown?.(e);
   }
   function stopEditButtonDrag(e: MouseEvent) {

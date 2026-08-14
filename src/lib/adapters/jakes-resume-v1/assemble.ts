@@ -10,7 +10,9 @@ import { declaredPackages } from "./packages";
  * resolves to here: the shell (always a contributor) keeps whatever
  * options its own line carries.
  */
-export function assembleJakeResume(input: ResumeComposition): AssembledLatexProject {
+export function assembleJakeResume(
+  input: ResumeComposition,
+): AssembledLatexProject {
   const declared = new Set(declaredPackages(input.shellPreamble));
   const missing = new Set<string>();
   for (const section of input.sections) {
@@ -30,13 +32,18 @@ export function assembleJakeResume(input: ResumeComposition): AssembledLatexProj
     .map((section) => {
       // header_chunk is the name/contact block that precedes any \section{}
       // in the source — render it as-is with no \section wrapper.
-      if (section.entries.length === 1 && section.entries[0].kind === "header_chunk") {
+      if (
+        section.entries.length === 1 &&
+        section.entries[0].kind === "header_chunk"
+      ) {
         return section.entries[0].rawLatex;
       }
       // section_chunk occupies its section exclusively (PLAN.md) — it's
       // opaque, already-structured content, so it's placed as-is rather
       // than wrapped in the subheading list macros.
-      const isChunk = section.entries.length === 1 && section.entries[0].kind === "section_chunk";
+      const isChunk =
+        section.entries.length === 1 &&
+        section.entries[0].kind === "section_chunk";
       const inner = isChunk
         ? section.entries[0].rawLatex
         : `\\resumeSubHeadingListStart\n${section.entries.map((e) => e.rawLatex).join("\n\n")}\n\\resumeSubHeadingListEnd`;
@@ -44,5 +51,7 @@ export function assembleJakeResume(input: ResumeComposition): AssembledLatexProj
     })
     .join("\n\n");
 
-  return { source: `${preamble}\n\\begin{document}\n${body}\n\\end{document}\n` };
+  return {
+    source: `${preamble}\n\\begin{document}\n${body}\n\\end{document}\n`,
+  };
 }

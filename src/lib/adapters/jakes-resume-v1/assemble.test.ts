@@ -32,10 +32,15 @@ describe("jakes-resume-v1 assemble", () => {
   const resume = extractJakeResume(fixture);
 
   it("wraps subheading/project sections in the list macros and leaves section_chunk bare", () => {
-    const composition = compositionFromExtracted(resume.preamble, ["Education", "Technical Skills"]);
+    const composition = compositionFromExtracted(resume.preamble, [
+      "Education",
+      "Technical Skills",
+    ]);
     const assembled = assembleJakeResume(composition);
 
-    expect(assembled.source).toContain("\\section{Education}\n\\resumeSubHeadingListStart");
+    expect(assembled.source).toContain(
+      "\\section{Education}\n\\resumeSubHeadingListStart",
+    );
     expect(assembled.source).toContain("\\resumeSubHeadingListEnd");
     expect(assembled.source).toContain("\\begin{document}");
     expect(assembled.source).toContain("\\end{document}");
@@ -47,18 +52,26 @@ describe("jakes-resume-v1 assemble", () => {
   });
 
   it("renders header_chunk with no \\section wrapper", () => {
-    const composition = compositionFromExtracted(resume.preamble, ["Name & Contact", "Education"]);
+    const composition = compositionFromExtracted(resume.preamble, [
+      "Name & Contact",
+      "Education",
+    ]);
     const assembled = assembleJakeResume(composition);
 
     expect(assembled.source).not.toContain("\\section{Name & Contact}");
-    const headerEntry = resume.sections.find((s) => s.title === "Name & Contact")!.entries[0];
+    const headerEntry = resume.sections.find(
+      (s) => s.title === "Name & Contact",
+    )!.entries[0];
     expect(assembled.source).toContain(headerEntry.rawLatex);
   });
 
   it("does not duplicate a package already declared in the shell preamble", () => {
-    const composition = compositionFromExtracted(resume.preamble, ["Education"]);
+    const composition = compositionFromExtracted(resume.preamble, [
+      "Education",
+    ]);
     const assembled = assembleJakeResume(composition);
-    const occurrences = assembled.source.match(/\\usepackage(?:\[[^\]]*\])?\{hyperref\}/g) ?? [];
+    const occurrences =
+      assembled.source.match(/\\usepackage(?:\[[^\]]*\])?\{hyperref\}/g) ?? [];
     expect(occurrences).toHaveLength(1);
   });
 
@@ -67,7 +80,9 @@ describe("jakes-resume-v1 assemble", () => {
       /\\usepackage(?:\[[^\]]*\])?\{hyperref\}\n?/,
       "",
     );
-    const composition = compositionFromExtracted(strippedPreamble, ["Education"]);
+    const composition = compositionFromExtracted(strippedPreamble, [
+      "Education",
+    ]);
     // Education entries carry requiredPackages from the full original preamble, incl. hyperref.
     const assembled = assembleJakeResume(composition);
     expect(assembled.source).toContain("\\usepackage{hyperref}");

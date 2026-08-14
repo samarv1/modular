@@ -6,7 +6,11 @@ import { createServiceClient } from "@/lib/supabase/server";
 // ever justifies the cost difference — is a change to this file alone.
 const BUCKET = "resume-archives";
 
-export async function uploadArchive(path: string, bytes: Uint8Array, contentType: string) {
+export async function uploadArchive(
+  path: string,
+  bytes: Uint8Array,
+  contentType: string,
+) {
   const client = createServiceClient();
   const { error } = await client.storage.from(BUCKET).upload(path, bytes, {
     contentType,
@@ -24,7 +28,11 @@ export async function getSignedUrl(
   const client = createServiceClient();
   const { data, error } = await client.storage
     .from(BUCKET)
-    .createSignedUrl(path, expiresInSeconds, options?.download ? { download: true } : undefined);
+    .createSignedUrl(
+      path,
+      expiresInSeconds,
+      options?.download ? { download: true } : undefined,
+    );
   if (error) throw error;
   return data.signedUrl;
 }

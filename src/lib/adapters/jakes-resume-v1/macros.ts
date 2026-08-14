@@ -29,4 +29,7 @@ export const JAKE_CONTRACT_MACROS = [
 ] as const;
 
 /** Macro names that start a bank entry within a resumeSubHeadingList. */
-export const ENTRY_BOUNDARY_MACROS = new Set(["resumeSubheading", "resumeProjectHeading"]);
+export const ENTRY_BOUNDARY_MACROS = new Set([
+  "resumeSubheading",
+  "resumeProjectHeading",
+]);

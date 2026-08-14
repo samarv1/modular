@@ -38,11 +38,16 @@ const args = process.argv.slice(2).filter((a) => a !== "--dry-run");
 const dryRun = process.argv.includes("--dry-run");
 const newOwnerId = args[0];
 if (!newOwnerId) {
-  console.error("usage: node scripts/reassign-owner.mjs <new-owner-uuid> [--dry-run]");
+  console.error(
+    "usage: node scripts/reassign-owner.mjs <new-owner-uuid> [--dry-run]",
+  );
   process.exit(1);
 }
 
-const client = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
+const client = new pg.Client({
+  connectionString: dbUrl,
+  ssl: { rejectUnauthorized: false },
+});
 
 await client.connect();
 try {
@@ -78,7 +83,9 @@ try {
   }
 
   if (dryRun) {
-    console.log("\ndry run only — rerun without --dry-run to actually reassign");
+    console.log(
+      "\ndry run only — rerun without --dry-run to actually reassign",
+    );
   }
 } finally {
   await client.end();

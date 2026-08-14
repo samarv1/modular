@@ -3,7 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useDraggable } from "@dnd-kit/core";
 import { RESUME_DRAG_PREFIX } from "@/components/home/desktop-dnd-ids";
-import { DesktopIconSlot, IconGlyphButton, IconLabel } from "@/components/home/desktop-icon";
+import {
+  DesktopIconSlot,
+  IconGlyphButton,
+  IconLabel,
+} from "@/components/home/desktop-icon";
 
 // A drawn blank-page shape (with a folded corner, Finder's generic-document
 // look), not a bordered card with a line icon inside — dragging moves the
@@ -41,9 +45,10 @@ export function ResumeIcon({
   onSelect: () => void;
 }) {
   const router = useRouter();
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: RESUME_DRAG_PREFIX + id,
-  });
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: RESUME_DRAG_PREFIX + id,
+    });
 
   // A plain click (no pointer movement past the drag activation distance —
   // see PointerSensor's activationConstraint in desktop.tsx) still fires
@@ -58,7 +63,13 @@ export function ResumeIcon({
   }
 
   return (
-    <DesktopIconSlot x={x} y={y} transform={transform} isDragging={isDragging} setRef={setNodeRef}>
+    <DesktopIconSlot
+      x={x}
+      y={y}
+      transform={transform}
+      isDragging={isDragging}
+      setRef={setNodeRef}
+    >
       <IconGlyphButton
         onSelect={select}
         onOpen={openResume}
@@ -68,7 +79,12 @@ export function ResumeIcon({
       >
         <DocumentGlyph />
       </IconGlyphButton>
-      <IconLabel title={title} selected={selected} onSelect={select} onOpen={openResume} />
+      <IconLabel
+        title={title}
+        selected={selected}
+        onSelect={select}
+        onOpen={openResume}
+      />
     </DesktopIconSlot>
   );
 }

@@ -4,7 +4,10 @@ import { getOwnerId } from "@/lib/owner";
 import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
 import { deleteOwnedRow } from "@/lib/delete-owned-row";
 import { renderEntry, renderHeader } from "@/lib/synthesize-jake-latex";
-import { ExtractedEntrySchema, HeaderDataSchema } from "@/lib/resume-extraction-schema";
+import {
+  ExtractedEntrySchema,
+  HeaderDataSchema,
+} from "@/lib/resume-extraction-schema";
 
 // Bank entries' raw LaTeX is regenerated from structured fields, not typed
 // directly — display name, tags, and a structured `entry`/`header` patch
@@ -17,21 +20,32 @@ export async function PATCH(
   const { id } = await params;
   const body = await readJsonObject(request);
   if (!body) {
-    return NextResponse.json({ error: "body must be a JSON object" }, { status: 400 });
+    return NextResponse.json(
+      { error: "body must be a JSON object" },
+      { status: 400 },
+    );
   }
 
   const values: Record<string, unknown> = {};
   if (typeof body.displayName === "string") {
     if (!body.displayName.trim()) {
-      return NextResponse.json({ error: "displayName cannot be empty" }, { status: 400 });
+      return NextResponse.json(
+        { error: "displayName cannot be empty" },
+        { status: 400 },
+      );
     }
     values.display_name = body.displayName.trim();
   }
   if (Array.isArray(body.tags)) {
     if (!body.tags.every((t: unknown) => typeof t === "string")) {
-      return NextResponse.json({ error: "tags must be strings" }, { status: 400 });
+      return NextResponse.json(
+        { error: "tags must be strings" },
+        { status: 400 },
+      );
     }
-    values.tags = [...new Set(body.tags.map((t: string) => t.trim()).filter(Boolean))];
+    values.tags = [
+      ...new Set(body.tags.map((t: string) => t.trim()).filter(Boolean)),
+    ];
   }
   // `entry` (subheading_entry/project_entry/section_chunk) and `header`
   // (header_chunk) are mutually exclusive, matching the two shapes a
@@ -39,13 +53,19 @@ export async function PATCH(
   if (body.entry !== undefined) {
     const parsed = ExtractedEntrySchema.safeParse(body.entry);
     if (!parsed.success) {
-      return NextResponse.json({ error: "invalid entry fields" }, { status: 400 });
+      return NextResponse.json(
+        { error: "invalid entry fields" },
+        { status: 400 },
+      );
     }
     values.raw_latex = renderEntry(parsed.data);
   } else if (body.header !== undefined) {
     const parsed = HeaderDataSchema.safeParse(body.header);
     if (!parsed.success) {
-      return NextResponse.json({ error: "invalid header fields" }, { status: 400 });
+      return NextResponse.json(
+        { error: "invalid header fields" },
+        { status: 400 },
+      );
     }
     values.raw_latex = renderHeader(parsed.data);
   }
@@ -78,9 +98,13 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  return deleteOwnedRow("bank_entry", id, "entry not found", (status, message) =>
-    status === 422
-      ? "This entry is used in a resume and can't be removed until it's taken out there first."
-      : message,
+  return deleteOwnedRow(
+    "bank_entry",
+    id,
+    "entry not found",
+    (status, message) =>
+      status === 422
+        ? "This entry is used in a resume and can't be removed until it's taken out there first."
+        : message,
   );
 }

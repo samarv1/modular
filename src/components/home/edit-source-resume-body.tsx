@@ -4,8 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { EntryEditor, HeaderFieldsEditor } from "@/components/bank/entry-editor";
-import { bankEntryToExtractedEntry, bankEntryToHeaderData } from "@/lib/bank-entry-fields";
+import {
+  EntryEditor,
+  HeaderFieldsEditor,
+} from "@/components/bank/entry-editor";
+import {
+  bankEntryToExtractedEntry,
+  bankEntryToHeaderData,
+} from "@/lib/bank-entry-fields";
 import { sectionGroupLabel } from "@/lib/section-label";
 import type { ExtractedEntry } from "@/lib/resume-extraction-schema";
 import type { BankEntryRow } from "@/lib/rows";
@@ -35,7 +41,9 @@ export function EditSourceResumeBody({
   const [entries, setEntries] = useState<BankEntryRow[]>([]);
   const [headerEntryId, setHeaderEntryId] = useState<string | null>(null);
   const [headerDraft, setHeaderDraft] = useState<HeaderDraft | null>(null);
-  const [entryDrafts, setEntryDrafts] = useState<Record<string, ExtractedEntry>>({});
+  const [entryDrafts, setEntryDrafts] = useState<
+    Record<string, ExtractedEntry>
+  >({});
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [dirty, setDirty] = useState(false);
 
@@ -43,7 +51,9 @@ export function EditSourceResumeBody({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/entries?sourceResumeId=${sourceResumeId}`);
+        const res = await fetch(
+          `/api/entries?sourceResumeId=${sourceResumeId}`,
+        );
         const body = await res.json().catch(() => null);
         if (cancelled) return;
         if (!res.ok || !Array.isArray(body?.entries)) {
@@ -57,7 +67,11 @@ export function EditSourceResumeBody({
         setHeaderEntryId(header?.id ?? null);
         setHeaderDraft(header ? bankEntryToHeaderData(header) : null);
         setEntries(rest);
-        setEntryDrafts(Object.fromEntries(rest.map((e) => [e.id, bankEntryToExtractedEntry(e)])));
+        setEntryDrafts(
+          Object.fromEntries(
+            rest.map((e) => [e.id, bankEntryToExtractedEntry(e)]),
+          ),
+        );
         setPhase("ready");
       } catch {
         if (!cancelled) {
@@ -83,12 +97,18 @@ export function EditSourceResumeBody({
       }
       byLabel.get(entry.source_section)!.push(entry);
     }
-    return order.map((label): [string, BankEntryRow[]] => [label, byLabel.get(label)!]);
+    return order.map((label): [string, BankEntryRow[]] => [
+      label,
+      byLabel.get(label)!,
+    ]);
   }, [entries, removedIds]);
 
   function updateEntry(id: string, patch: Partial<ExtractedEntry>) {
     setDirty(true);
-    setEntryDrafts((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } as ExtractedEntry }));
+    setEntryDrafts((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], ...patch } as ExtractedEntry,
+    }));
   }
 
   function removeEntry(id: string) {
@@ -119,17 +139,29 @@ export function EditSourceResumeBody({
               }),
             ]
           : [];
-      const deletes = Array.from(removedIds).map((id) => fetch(`/api/entries/${id}`, { method: "DELETE" }));
+      const deletes = Array.from(removedIds).map((id) =>
+        fetch(`/api/entries/${id}`, { method: "DELETE" }),
+      );
 
-      const results = await Promise.all([...patches, ...headerPatch, ...deletes]);
+      const results = await Promise.all([
+        ...patches,
+        ...headerPatch,
+        ...deletes,
+      ]);
       const failed = results.find((r) => !r.ok);
       if (failed) {
         const body = await failed.json().catch(() => null);
-        throw new Error(typeof body?.error === "string" ? body.error : "some changes could not be saved");
+        throw new Error(
+          typeof body?.error === "string"
+            ? body.error
+            : "some changes could not be saved",
+        );
       }
       onSaved();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "some changes could not be saved");
+      setErrorMessage(
+        err instanceof Error ? err.message : "some changes could not be saved",
+      );
       setPhase("ready");
     }
   }
@@ -145,7 +177,9 @@ export function EditSourceResumeBody({
   if (!headerDraft && entries.length === 0) {
     return (
       <div className="flex flex-col gap-3">
-        {errorMessage && <span className="text-[11.5px] text-danger">{errorMessage}</span>}
+        {errorMessage && (
+          <span className="text-[11.5px] text-danger">{errorMessage}</span>
+        )}
         <Button variant="outline" onClick={onCancel} className="self-start">
           Close
         </Button>
@@ -183,14 +217,24 @@ export function EditSourceResumeBody({
         ))}
       </div>
 
-      {errorMessage && <span className="text-[11.5px] text-danger">{errorMessage}</span>}
+      {errorMessage && (
+        <span className="text-[11.5px] text-danger">{errorMessage}</span>
+      )}
 
       <DialogFooter>
-        <Button variant="outline" onClick={onCancel} disabled={phase === "saving"}>
+        <Button
+          variant="outline"
+          onClick={onCancel}
+          disabled={phase === "saving"}
+        >
           Cancel
         </Button>
         <Button onClick={save} disabled={phase === "saving" || !dirty}>
-          {phase === "saving" ? <Loader2 className="size-3.5 animate-spin" /> : "Save changes"}
+          {phase === "saving" ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            "Save changes"
+          )}
         </Button>
       </DialogFooter>
     </>

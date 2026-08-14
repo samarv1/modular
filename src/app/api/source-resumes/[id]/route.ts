@@ -16,20 +16,33 @@ export async function DELETE(
   const { id } = await params;
   const ownerId = await getOwnerId();
 
-  const { data: usedEntries, error: usedError } = asRows<{ bank_entry_id: string }>(
-    await ownerScopedTable("resume_section_entry", ownerId).select("bank_entry_id"),
+  const { data: usedEntries, error: usedError } = asRows<{
+    bank_entry_id: string;
+  }>(
+    await ownerScopedTable("resume_section_entry", ownerId).select(
+      "bank_entry_id",
+    ),
   );
   if (usedError) throw new Error(usedError.message);
   const usedIds = new Set((usedEntries ?? []).map((e) => e.bank_entry_id));
 
-  const { data: candidateEntries, error: candidateError } = asRows<{ id: string }>(
-    await ownerScopedTable("bank_entry", ownerId).select("id").eq("source_resume_id", id),
+  const { data: candidateEntries, error: candidateError } = asRows<{
+    id: string;
+  }>(
+    await ownerScopedTable("bank_entry", ownerId)
+      .select("id")
+      .eq("source_resume_id", id),
   );
   if (candidateError) throw new Error(candidateError.message);
-  const unusedIds = (candidateEntries ?? []).map((e) => e.id).filter((entryId) => !usedIds.has(entryId));
+  const unusedIds = (candidateEntries ?? [])
+    .map((e) => e.id)
+    .filter((entryId) => !usedIds.has(entryId));
 
   if (unusedIds.length > 0) {
-    const { error: deleteEntriesError } = await ownerScopedTable("bank_entry", ownerId)
+    const { error: deleteEntriesError } = await ownerScopedTable(
+      "bank_entry",
+      ownerId,
+    )
       .delete()
       .in("id", unusedIds);
     if (deleteEntriesError) throw new Error(deleteEntriesError.message);

@@ -17,7 +17,9 @@ describe("jakes-resume-v1 contract check", () => {
   });
 
   it("rejects a source missing the macro contract", () => {
-    const result = checkJakeContract("\\documentclass{article}\\begin{document}hi\\end{document}");
+    const result = checkJakeContract(
+      "\\documentclass{article}\\begin{document}hi\\end{document}",
+    );
     expect(result.compatible).toBe(false);
     expect(result.missing.length).toBeGreaterThan(0);
   });
@@ -25,9 +27,7 @@ describe("jakes-resume-v1 contract check", () => {
   it("does not count commented-out macro declarations", () => {
     const commentedDeclarations = fixture
       .split("\n")
-      .map((line) =>
-        /\\(?:re)?newcommand/.test(line) ? `% ${line}` : line,
-      )
+      .map((line) => (/\\(?:re)?newcommand/.test(line) ? `% ${line}` : line))
       .join("\n");
     const result = checkJakeContract(commentedDeclarations);
     expect(result.compatible).toBe(false);
@@ -57,13 +57,17 @@ describe("jakes-resume-v1 extraction", () => {
   it("extracts 2 education entries", () => {
     const section = resume.sections.find((s) => s.title === "Education")!;
     expect(section.entries).toHaveLength(2);
-    expect(section.entries.every((e) => e.kind === "subheading_entry")).toBe(true);
+    expect(section.entries.every((e) => e.kind === "subheading_entry")).toBe(
+      true,
+    );
   });
 
   it("extracts 3 experience entries, folding resumeSubSubheading into its preceding entry", () => {
     const section = resume.sections.find((s) => s.title === "Experience")!;
     expect(section.entries).toHaveLength(3);
-    expect(section.entries.every((e) => e.kind === "subheading_entry")).toBe(true);
+    expect(section.entries.every((e) => e.kind === "subheading_entry")).toBe(
+      true,
+    );
   });
 
   it("extracts 2 project entries", () => {
@@ -73,7 +77,9 @@ describe("jakes-resume-v1 extraction", () => {
   });
 
   it("extracts the Technical Skills section as a single section_chunk", () => {
-    const section = resume.sections.find((s) => s.title === "Technical Skills")!;
+    const section = resume.sections.find(
+      (s) => s.title === "Technical Skills",
+    )!;
     expect(section.entries).toHaveLength(1);
     expect(section.entries[0].kind).toBe("section_chunk");
   });
@@ -81,7 +87,10 @@ describe("jakes-resume-v1 extraction", () => {
   it("produces raw LaTeX slices that round-trip from the source", () => {
     for (const section of resume.sections) {
       for (const entry of section.entries) {
-        const slice = fixture.slice(entry.sourceOffsetStart, entry.sourceOffsetEnd);
+        const slice = fixture.slice(
+          entry.sourceOffsetStart,
+          entry.sourceOffsetEnd,
+        );
         expect(slice).toBe(entry.rawLatex);
       }
     }

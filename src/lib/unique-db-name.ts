@@ -22,6 +22,8 @@ export async function dedupedName(
   if (options.excludeNulls) query = query.not(column, "is", null);
   const { data, error } = await query;
   if (error) throw new Error((error as { message: string }).message);
-  const existingNames = ((data ?? []) as unknown as Record<string, string>[]).map((row) => row[column]);
+  const existingNames = (
+    (data ?? []) as unknown as Record<string, string>[]
+  ).map((row) => row[column]);
   return dedupeName(desired, existingNames);
 }

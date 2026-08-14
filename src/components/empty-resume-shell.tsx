@@ -32,17 +32,26 @@ export function EmptyResumeShell({ folderId }: { folderId: string | null }) {
   // bank file to upload in between), so a position captured up front would
   // be stale against whatever else got created/moved/deleted meanwhile.
   async function nextPosition(): Promise<{ x: number; y: number }> {
-    const [resumesRes, foldersRes] = await Promise.all([fetch("/api/resumes"), fetch("/api/folders")]);
+    const [resumesRes, foldersRes] = await Promise.all([
+      fetch("/api/resumes"),
+      fetch("/api/folders"),
+    ]);
     const { resumes } = (await resumesRes.json()) as { resumes: ResumeRow[] };
-    const { folders } = (await foldersRes.json()) as { folders: ResumeFolderRow[] };
+    const { folders } = (await foldersRes.json()) as {
+      folders: ResumeFolderRow[];
+    };
     const occupied =
       folderId === null
         ? [
             ...readStaticPagePositions(),
             ...folders.map((f) => ({ x: f.position_x, y: f.position_y })),
-            ...resumes.filter((r) => r.folder_id === null).map((r) => ({ x: r.position_x, y: r.position_y })),
+            ...resumes
+              .filter((r) => r.folder_id === null)
+              .map((r) => ({ x: r.position_x, y: r.position_y })),
           ]
-        : resumes.filter((r) => r.folder_id === folderId).map((r) => ({ x: r.position_x, y: r.position_y }));
+        : resumes
+            .filter((r) => r.folder_id === folderId)
+            .map((r) => ({ x: r.position_x, y: r.position_y }));
     return nextFreePlacement(occupied);
   }
 
@@ -56,7 +65,12 @@ export function EmptyResumeShell({ folderId }: { folderId: string | null }) {
       const res = await fetch("/api/resumes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Untitled resume", folderId, positionX: pos.x, positionY: pos.y }),
+        body: JSON.stringify({
+          title: "Untitled resume",
+          folderId,
+          positionX: pos.x,
+          positionY: pos.y,
+        }),
       });
       if (!res.ok) throw new Error("resume create failed");
       const { resume } = await res.json();
@@ -72,19 +86,35 @@ export function EmptyResumeShell({ folderId }: { folderId: string | null }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 border-b border-line px-3 pt-4 pb-1">
         <BackToDesktopLink />
-        <span className="px-1 py-1 text-[13px] font-semibold text-faint">Untitled resume</span>
-        {creating && <span className="px-2 text-[11.5px] text-faint">Setting up your resume…</span>}
-        {error && <span className="px-2 text-[11.5px] text-danger">{error}</span>}
+        <span className="px-1 py-1 text-[13px] font-semibold text-faint">
+          Untitled resume
+        </span>
+        {creating && (
+          <span className="px-2 text-[11.5px] text-faint">
+            Setting up your resume…
+          </span>
+        )}
+        {error && (
+          <span className="px-2 text-[11.5px] text-danger">{error}</span>
+        )}
       </div>
 
       <DndContext id="empty-resume-dnd" collisionDetection={pointerWithin}>
         <div className="flex min-h-0 flex-1">
           <div className="min-h-0 w-[38%]">
-            <BankPane entries={entries} usedEntryIds={EMPTY_USED_IDS} onEntriesImported={onFirstImport} />
+            <BankPane
+              entries={entries}
+              usedEntryIds={EMPTY_USED_IDS}
+              onEntriesImported={onFirstImport}
+            />
           </div>
           <div className="w-px shrink-0 bg-line" />
           <div className="min-h-0 min-w-[15%] flex-1">
-            <OutlinePane sections={[]} entryById={EMPTY_ENTRY_MAP} onChange={() => {}} />
+            <OutlinePane
+              sections={[]}
+              entryById={EMPTY_ENTRY_MAP}
+              onChange={() => {}}
+            />
           </div>
           <div className="w-px shrink-0 bg-line" />
           <div className="min-h-0 w-[30%]">

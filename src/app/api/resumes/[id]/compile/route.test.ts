@@ -12,7 +12,9 @@ vi.mock("@/lib/owner", () => ({ getOwnerId: async () => testOwnerId }));
 
 const compileLatexInSandbox = vi.fn();
 const uploadArchive = vi.fn().mockResolvedValue(undefined);
-vi.mock("@/lib/sandbox-compile", () => ({ compileLatexInSandbox: (...args: unknown[]) => compileLatexInSandbox(...args) }));
+vi.mock("@/lib/sandbox-compile", () => ({
+  compileLatexInSandbox: (...args: unknown[]) => compileLatexInSandbox(...args),
+}));
 vi.mock("@/lib/storage", () => ({
   uploadArchive: (...args: unknown[]) => uploadArchive(...args),
   getSignedUrl: vi.fn().mockResolvedValue("https://example.com/signed"),
@@ -22,11 +24,18 @@ vi.mock("@/lib/storage", () => ({
 const { POST } = await import("./route");
 
 function fakePdf(tag: string) {
-  return { success: true, pdf: Buffer.from(`%PDF-${tag}`), log: "ok", pageCount: 1 };
+  return {
+    success: true,
+    pdf: Buffer.from(`%PDF-${tag}`),
+    log: "ok",
+    pageCount: 1,
+  };
 }
 
 async function callCompile(resumeId: string) {
-  return POST(new Request("http://localhost"), { params: Promise.resolve({ id: resumeId }) });
+  return POST(new Request("http://localhost"), {
+    params: Promise.resolve({ id: resumeId }),
+  });
 }
 
 describe("POST /api/resumes/:id/compile — compile races", () => {
@@ -35,7 +44,10 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
   let bankEntryId: string;
 
   beforeAll(async () => {
-    const { data: shell, error: shellError } = await ownerScopedTable("template_shell", testOwnerId)
+    const { data: shell, error: shellError } = await ownerScopedTable(
+      "template_shell",
+      testOwnerId,
+    )
       .insert({
         archive_path: "test/compile-race-shell.zip",
         root_file: "resume.tex",
@@ -48,7 +60,10 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
     if (shellError) throw new Error(shellError.message);
     shellId = (shell as { id: string }).id;
 
-    const { data: bankEntry, error: bankEntryError } = await ownerScopedTable("bank_entry", testOwnerId)
+    const { data: bankEntry, error: bankEntryError } = await ownerScopedTable(
+      "bank_entry",
+      testOwnerId,
+    )
       .insert({
         kind: "section_chunk",
         source_section: "Summary",
@@ -64,20 +79,35 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
     if (bankEntryError) throw new Error(bankEntryError.message);
     bankEntryId = (bankEntry as { id: string }).id;
 
-    const { data: resume, error: resumeError } = await ownerScopedTable("resume", testOwnerId)
-      .insert({ title: `Compile race test ${crypto.randomUUID()}`, template_shell_id: shellId })
+    const { data: resume, error: resumeError } = await ownerScopedTable(
+      "resume",
+      testOwnerId,
+    )
+      .insert({
+        title: `Compile race test ${crypto.randomUUID()}`,
+        template_shell_id: shellId,
+      })
       .select("id")
       .single();
     if (resumeError) throw new Error(resumeError.message);
     resumeId = (resume as { id: string }).id;
 
-    await setResumeComposition(resumeId, [{ title: "Summary", entries: [bankEntryId] }]);
+    await setResumeComposition(resumeId, [
+      { title: "Summary", entries: [bankEntryId] },
+    ]);
   });
 
   afterAll(async () => {
-    if (resumeId) await ownerScopedTable("resume", testOwnerId).delete().eq("id", resumeId);
-    if (bankEntryId) await ownerScopedTable("bank_entry", testOwnerId).delete().eq("id", bankEntryId);
-    if (shellId) await ownerScopedTable("template_shell", testOwnerId).delete().eq("id", shellId);
+    if (resumeId)
+      await ownerScopedTable("resume", testOwnerId).delete().eq("id", resumeId);
+    if (bankEntryId)
+      await ownerScopedTable("bank_entry", testOwnerId)
+        .delete()
+        .eq("id", bankEntryId);
+    if (shellId)
+      await ownerScopedTable("template_shell", testOwnerId)
+        .delete()
+        .eq("id", shellId);
   });
 
   it("keeps only the newest compile's result when an older one finishes last", async () => {
@@ -90,7 +120,9 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
         });
       });
     });
-    compileLatexInSandbox.mockImplementationOnce(() => Promise.resolve(fakePdf("newer")));
+    compileLatexInSandbox.mockImplementationOnce(() =>
+      Promise.resolve(fakePdf("newer")),
+    );
 
     const olderCall = callCompile(resumeId);
     await olderStarted; // older request's "compiling" write has landed, it's now blocked inside compileLatexInSandbox
@@ -103,7 +135,10 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
     resolveOlder(fakePdf("older"));
     await olderCall;
 
-    const { data: finalRow, error } = await ownerScopedTable("resume", testOwnerId)
+    const { data: finalRow, error } = await ownerScopedTable(
+      "resume",
+      testOwnerId,
+    )
       .select("compile_status, pdf_artifact_path, last_compile_request_id")
       .eq("id", resumeId)
       .single();
@@ -123,6 +158,11 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
     expect(newerPath).not.toBe(olderPath);
     expect(row.compile_status).toBe("success");
     expect(row.pdf_artifact_path).toBe(newerPath);
-    expect(row.last_compile_request_id).toBe(newerPath.split("/").pop()!.replace(/\.pdf$/, ""));
+    expect(row.last_compile_request_id).toBe(
+      newerPath
+        .split("/")
+        .pop()!
+        .replace(/\.pdf$/, ""),
+    );
   });
 });

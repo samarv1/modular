@@ -16,7 +16,10 @@ import { isUuid } from "@/lib/api-request";
 // .eq("last_compile_request_id", requestId) so a newer compile that started
 // meanwhile silently wins (PLAN.md's latest-request-wins rule) instead of
 // this one clobbering it.
-export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const { id } = await params;
   if (!isUuid(id)) {
     return NextResponse.json({ error: "resume not found" }, { status: 404 });
@@ -27,7 +30,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "resume not found" }, { status: 404 });
   }
 
-  const totalEntries = loaded.composition.sections.reduce((n, s) => n + s.entries.length, 0);
+  const totalEntries = loaded.composition.sections.reduce(
+    (n, s) => n + s.entries.length,
+    0,
+  );
   if (totalEntries === 0) {
     return NextResponse.json(
       { error: "add at least one entry before compiling" },
@@ -41,7 +47,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   const ownerId = await getOwnerId();
   const requestId = randomUUID();
   const { error: startError } = await ownerScopedTable("resume", ownerId)
-    .update({ compile_status: "compiling", last_compile_request_id: requestId, compile_error: null })
+    .update({
+      compile_status: "compiling",
+      last_compile_request_id: requestId,
+      compile_error: null,
+    })
     .eq("id", id);
   if (startError) throw new Error(startError.message);
 
@@ -60,12 +70,18 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       .update({ compile_status: "failed", compile_error: compileError })
       .eq("id", id)
       .eq("last_compile_request_id", requestId);
-    return NextResponse.json({ compileStatus: "failed", compileError }, { status: 500 });
+    return NextResponse.json(
+      { compileStatus: "failed", compileError },
+      { status: 500 },
+    );
   }
 
   if (!result.success || !result.pdf) {
     await ownerScopedTable("resume", ownerId)
-      .update({ compile_status: "failed", compile_error: result.log.slice(-4000) })
+      .update({
+        compile_status: "failed",
+        compile_error: result.log.slice(-4000),
+      })
       .eq("id", id)
       .eq("last_compile_request_id", requestId);
     return NextResponse.json(
@@ -77,7 +93,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   const pdfPath = `compiled/${ownerId}/${id}/${requestId}.pdf`;
   await uploadArchive(pdfPath, new Uint8Array(result.pdf), "application/pdf");
 
-  const compileStatus = result.pageCount && result.pageCount > 1 ? "blocked_multipage" : "success";
+  const compileStatus =
+    result.pageCount && result.pageCount > 1 ? "blocked_multipage" : "success";
 
   const { error: finishError } = await ownerScopedTable("resume", ownerId)
     .update({
@@ -96,8 +113,15 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   // the `download` option, so a single URL can't serve both.
   const [pdfUrl, pdfDownloadUrl] = await Promise.all([
     getSignedUrl(pdfPath),
-    getSignedUrl(pdfPath, 3600, { download: resumeDownloadFilename(loaded.title) }),
+    getSignedUrl(pdfPath, 3600, {
+      download: resumeDownloadFilename(loaded.title),
+    }),
   ]);
 
-  return NextResponse.json({ compileStatus, pageCount: result.pageCount, pdfUrl, pdfDownloadUrl });
+  return NextResponse.json({
+    compileStatus,
+    pageCount: result.pageCount,
+    pdfUrl,
+    pdfDownloadUrl,
+  });
 }

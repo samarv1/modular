@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { getOwnerId } from "@/lib/owner";
-import { convertPdfToMarkdown, PdfToMarkdownError } from "@/lib/pdf-to-markdown";
-import { extractResumeStructure, ResumeExtractionError } from "@/lib/resume-extraction";
+import {
+  convertPdfToMarkdown,
+  PdfToMarkdownError,
+} from "@/lib/pdf-to-markdown";
+import {
+  extractResumeStructure,
+  ResumeExtractionError,
+} from "@/lib/resume-extraction";
 import { ResumeExtractionSchema } from "@/lib/resume-extraction-schema";
 import { synthesizeJakeArchive } from "@/lib/synthesize-jake-archive";
 import { ArchiveRejectedError } from "@/lib/latex-archive";
@@ -20,7 +26,10 @@ const MAX_PDF_BYTES = 25 * 1024 * 1024;
 export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
   if (!form) {
-    return NextResponse.json({ error: "body must be multipart form data" }, { status: 400 });
+    return NextResponse.json(
+      { error: "body must be multipart form data" },
+      { status: 400 },
+    );
   }
   const mode = form.get("mode") === "commit" ? "commit" : "preview";
   const ownerId = await getOwnerId();
@@ -44,7 +53,10 @@ export async function POST(request: Request) {
       markdown = await convertPdfToMarkdown(pdfBytes);
     } catch (err) {
       if (err instanceof PdfToMarkdownError) {
-        return NextResponse.json({ error: `could not read pdf: ${err.message}` }, { status: 422 });
+        return NextResponse.json(
+          { error: `could not read pdf: ${err.message}` },
+          { status: 422 },
+        );
       }
       throw err;
     }
@@ -58,7 +70,10 @@ export async function POST(request: Request) {
       }
       throw err;
     }
-    return NextResponse.json({ extraction, filenameHint: file.name.replace(/\.pdf$/i, "").trim() });
+    return NextResponse.json({
+      extraction,
+      filenameHint: file.name.replace(/\.pdf$/i, "").trim(),
+    });
   }
 
   const rawExtraction = form.get("extraction");
@@ -69,12 +84,18 @@ export async function POST(request: Request) {
   try {
     rawJson = JSON.parse(rawExtraction);
   } catch {
-    return NextResponse.json({ error: "extraction is not valid JSON" }, { status: 400 });
+    return NextResponse.json(
+      { error: "extraction is not valid JSON" },
+      { status: 400 },
+    );
   }
   const parsed = ResumeExtractionSchema.safeParse(rawJson);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "extraction did not match the expected shape", details: parsed.error.issues },
+      {
+        error: "extraction did not match the expected shape",
+        details: parsed.error.issues,
+      },
       { status: 422 },
     );
   }
@@ -87,14 +108,21 @@ export async function POST(request: Request) {
   const invalidEntries = extraction.sections.flatMap((section) =>
     section.entries
       .filter((entry) => {
-        if (entry.kind === "section_chunk") return !entry.items || entry.items.length === 0;
+        if (entry.kind === "section_chunk")
+          return !entry.items || entry.items.length === 0;
         return !entry.title;
       })
-      .map((entry) => `"${section.title}" entry missing ${entry.kind === "section_chunk" ? "items" : "a title"}`),
+      .map(
+        (entry) =>
+          `"${section.title}" entry missing ${entry.kind === "section_chunk" ? "items" : "a title"}`,
+      ),
   );
   if (invalidEntries.length > 0) {
     return NextResponse.json(
-      { error: "some entries are missing required fields", details: invalidEntries },
+      {
+        error: "some entries are missing required fields",
+        details: invalidEntries,
+      },
       { status: 422 },
     );
   }
@@ -108,7 +136,10 @@ export async function POST(request: Request) {
   } catch (err) {
     if (err instanceof ArchiveRejectedError) {
       return NextResponse.json(
-        { error: `conversion to a resume failed: ${err.reason}`, details: err.details },
+        {
+          error: `conversion to a resume failed: ${err.reason}`,
+          details: err.details,
+        },
         { status: 500 },
       );
     }
@@ -117,12 +148,18 @@ export async function POST(request: Request) {
   const { zipBytes, archive, adapter, result } = converted;
   if (!adapter || !result.compatible) {
     return NextResponse.json(
-      { error: "conversion to a resume failed: synthesized document was not recognized" },
+      {
+        error:
+          "conversion to a resume failed: synthesized document was not recognized",
+      },
       { status: 500 },
     );
   }
 
-  const extracted = adapter.extract({ rootFile: archive.rootFile, source: archive.source });
+  const extracted = adapter.extract({
+    rootFile: archive.rootFile,
+    source: archive.source,
+  });
   const flatEntries = flattenEntries(extracted);
   if (flatEntries.length === 0) {
     return NextResponse.json(
@@ -133,7 +170,9 @@ export async function POST(request: Request) {
 
   const filenameHint = form.get("filenameHint");
   const desiredDisplayName =
-    (typeof filenameHint === "string" && filenameHint.trim()) || extraction.header.name || "Imported resume";
+    (typeof filenameHint === "string" && filenameHint.trim()) ||
+    extraction.header.name ||
+    "Imported resume";
 
   const commitResult = await commitImport({
     ownerId,

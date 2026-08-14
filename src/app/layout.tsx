@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Roboto_Condensed, IBM_Plex_Sans, Martian_Mono } from "next/font/google";
+import {
+  Roboto_Condensed,
+  IBM_Plex_Sans,
+  Martian_Mono,
+} from "next/font/google";
 import { cn } from "@/lib/utils";
 
 const display = Roboto_Condensed({
@@ -54,7 +58,7 @@ export default function RootLayout({
         "font-sans",
         display.variable,
         body.variable,
-        mono.variable
+        mono.variable,
       )}
     >
       <body className="flex h-dvh flex-col overflow-hidden">{children}</body>

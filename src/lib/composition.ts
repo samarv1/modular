@@ -38,7 +38,10 @@ export async function setResumeComposition(
   if (!error) return;
 
   if (error.code === "23505") {
-    throw new CompositionError("an entry can only appear once in a resume", "duplicate_entry");
+    throw new CompositionError(
+      "an entry can only appear once in a resume",
+      "duplicate_entry",
+    );
   }
   if (error.code === "P0002") {
     throw new CompositionError(error.message, "not_found");

@@ -8,6 +8,7 @@ export function entryDisplayName(
   sourceSection: string,
 ): string {
   if (kind === "project_entry") return title ?? "";
-  if (kind === "subheading_entry") return [title, organization].filter(Boolean).join(" — ");
+  if (kind === "subheading_entry")
+    return [title, organization].filter(Boolean).join(" — ");
   return sourceSection;
 }

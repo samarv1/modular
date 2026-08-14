@@ -24,7 +24,9 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-dvh flex-1 flex-col items-center justify-center gap-6">
-      <span className="font-mono text-lg font-semibold uppercase tracking-tight">Modular</span>
+      <span className="font-mono text-lg font-semibold uppercase tracking-tight">
+        Modular
+      </span>
       <Button onClick={signInWithGoogle} disabled={pending}>
         {pending ? "Redirecting…" : "Sign in with Google"}
       </Button>

@@ -1,13 +1,23 @@
 import { NextResponse } from "next/server";
 import { asRow, asRows, ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
-import { CompositionError, compositionErrorStatus, setResumeComposition } from "@/lib/composition";
+import {
+  CompositionError,
+  compositionErrorStatus,
+  setResumeComposition,
+} from "@/lib/composition";
 import { dedupedName } from "@/lib/unique-db-name";
 import { readJsonObject } from "@/lib/api-request";
-import { integerFieldError, nullableStringFieldError } from "@/lib/field-validation";
+import {
+  integerFieldError,
+  nullableStringFieldError,
+} from "@/lib/field-validation";
 import type { ResumeRow } from "@/lib/rows";
 
-async function ownerHasFolder(ownerId: string, folderId: string | null | undefined): Promise<boolean> {
+async function ownerHasFolder(
+  ownerId: string,
+  folderId: string | null | undefined,
+): Promise<boolean> {
   if (folderId === null || folderId === undefined) return true;
   const { data, error } = asRow<{ id: string }>(
     await ownerScopedTable("resume_folder", ownerId)
@@ -25,7 +35,9 @@ export async function GET() {
   const ownerId = await getOwnerId();
   const { data, error } = asRows<ResumeRow>(
     await ownerScopedTable("resume", ownerId)
-      .select("id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at")
+      .select(
+        "id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at",
+      )
       .order("created_at", { ascending: true }),
   );
   if (error) throw new Error(error.message);
@@ -39,20 +51,34 @@ export async function GET() {
 export async function POST(request: Request) {
   const body = await readJsonObject(request);
   if (!body) {
-    return NextResponse.json({ error: "body must be a JSON object" }, { status: 400 });
+    return NextResponse.json(
+      { error: "body must be a JSON object" },
+      { status: 400 },
+    );
   }
-  const desiredTitle = typeof body.title === "string" && body.title.trim() ? body.title.trim() : "Untitled resume";
+  const desiredTitle =
+    typeof body.title === "string" && body.title.trim()
+      ? body.title.trim()
+      : "Untitled resume";
   const title = await dedupedName("resume", "title", desiredTitle);
 
-  const fieldError = integerFieldError(body, ["positionX", "positionY"]) ?? nullableStringFieldError(body, "folderId");
+  const fieldError =
+    integerFieldError(body, ["positionX", "positionY"]) ??
+    nullableStringFieldError(body, "folderId");
   if (fieldError) return fieldError;
-  if (typeof body.positionX !== "number" || typeof body.positionY !== "number") {
+  if (
+    typeof body.positionX !== "number" ||
+    typeof body.positionY !== "number"
+  ) {
     // Every caller (Desktop's "New resume", the empty-bank shell) computes an
     // occupancy-checked position before POSTing — a missing one means the
     // caller has a bug, not that (0,0) is a reasonable fallback. (0,0) sits
     // on top of the desktop's first icon, so silently defaulting to it here
     // used to produce icons stacked on top of each other.
-    return NextResponse.json({ error: "positionX and positionY are required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "positionX and positionY are required" },
+      { status: 400 },
+    );
   }
 
   // Desktop placement (Phase 6) — the caller (Desktop's "New resume") computes
@@ -60,12 +86,20 @@ export async function POST(request: Request) {
   const position = {
     positionX: body.positionX,
     positionY: body.positionY,
-    folderId: body.folderId === null || typeof body.folderId === "string" ? body.folderId : undefined,
+    folderId:
+      body.folderId === null || typeof body.folderId === "string"
+        ? body.folderId
+        : undefined,
   };
 
   const ownerId = await getOwnerId();
   if (typeof body.duplicateFromResumeId === "string") {
-    return duplicateResume(ownerId, body.duplicateFromResumeId, title, position);
+    return duplicateResume(
+      ownerId,
+      body.duplicateFromResumeId,
+      title,
+      position,
+    );
   }
   return createBlankResume(
     ownerId,
@@ -79,7 +113,11 @@ async function createBlankResume(
   ownerId: string,
   templateShellId: string | undefined,
   title: string,
-  position: { positionX?: number; positionY?: number; folderId?: string | null },
+  position: {
+    positionX?: number;
+    positionY?: number;
+    folderId?: string | null;
+  },
 ) {
   if (!(await ownerHasFolder(ownerId, position.folderId))) {
     return NextResponse.json({ error: "folder not found" }, { status: 422 });
@@ -90,7 +128,9 @@ async function createBlankResume(
   // proof there's anything to build a blank resume from. Require at least
   // one successfully imported bank resume, same check GET /api/source-resumes
   // uses for the Bank pane's own empty state.
-  const { data: sourceResume, error: sourceResumeError } = asRow<{ id: string }>(
+  const { data: sourceResume, error: sourceResumeError } = asRow<{
+    id: string;
+  }>(
     await ownerScopedTable("source_resume", ownerId)
       .select("id")
       .eq("import_status", "success")
@@ -115,7 +155,10 @@ async function createBlankResume(
     );
     if (shellError) throw new Error(shellError.message);
     if (!shell) {
-      return NextResponse.json({ error: "template shell not found" }, { status: 422 });
+      return NextResponse.json(
+        { error: "template shell not found" },
+        { status: 422 },
+      );
     }
   } else {
     const { data: shell, error: shellError } = asRow<{ id: string }>(
@@ -140,11 +183,19 @@ async function createBlankResume(
       .insert({
         title,
         template_shell_id: shellId,
-        ...(position.positionX !== undefined ? { position_x: position.positionX } : {}),
-        ...(position.positionY !== undefined ? { position_y: position.positionY } : {}),
-        ...(position.folderId !== undefined ? { folder_id: position.folderId } : {}),
+        ...(position.positionX !== undefined
+          ? { position_x: position.positionX }
+          : {}),
+        ...(position.positionY !== undefined
+          ? { position_y: position.positionY }
+          : {}),
+        ...(position.folderId !== undefined
+          ? { folder_id: position.folderId }
+          : {}),
       })
-      .select("id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at")
+      .select(
+        "id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at",
+      )
       .single(),
   );
   if (error) throw new Error(error.message);
@@ -155,21 +206,38 @@ async function duplicateResume(
   ownerId: string,
   sourceResumeId: string,
   title: string,
-  position: { positionX?: number; positionY?: number; folderId?: string | null },
+  position: {
+    positionX?: number;
+    positionY?: number;
+    folderId?: string | null;
+  },
 ) {
   if (!(await ownerHasFolder(ownerId, position.folderId))) {
     return NextResponse.json({ error: "folder not found" }, { status: 422 });
   }
 
-  const { data: source, error: sourceError } = asRow<{ id: string; template_shell_id: string }>(
-    await ownerScopedTable("resume", ownerId).select("id, template_shell_id").eq("id", sourceResumeId).maybeSingle(),
+  const { data: source, error: sourceError } = asRow<{
+    id: string;
+    template_shell_id: string;
+  }>(
+    await ownerScopedTable("resume", ownerId)
+      .select("id, template_shell_id")
+      .eq("id", sourceResumeId)
+      .maybeSingle(),
   );
   if (sourceError) throw new Error(sourceError.message);
   if (!source) {
-    return NextResponse.json({ error: "resume to duplicate not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "resume to duplicate not found" },
+      { status: 404 },
+    );
   }
 
-  const { data: sections, error: sectionsError } = asRows<{ id: string; title: string; position: number }>(
+  const { data: sections, error: sectionsError } = asRows<{
+    id: string;
+    title: string;
+    position: number;
+  }>(
     await ownerScopedTable("resume_section", ownerId)
       .select("id, title, position")
       .eq("resume_id", sourceResumeId)
@@ -194,11 +262,19 @@ async function duplicateResume(
       .insert({
         title,
         template_shell_id: source.template_shell_id,
-        ...(position.positionX !== undefined ? { position_x: position.positionX } : {}),
-        ...(position.positionY !== undefined ? { position_y: position.positionY } : {}),
-        ...(position.folderId !== undefined ? { folder_id: position.folderId } : {}),
+        ...(position.positionX !== undefined
+          ? { position_x: position.positionX }
+          : {}),
+        ...(position.positionY !== undefined
+          ? { position_y: position.positionY }
+          : {}),
+        ...(position.folderId !== undefined
+          ? { folder_id: position.folderId }
+          : {}),
       })
-      .select("id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at")
+      .select(
+        "id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at",
+      )
       .single(),
   );
   if (createError) throw new Error(createError.message);
@@ -216,9 +292,15 @@ async function duplicateResume(
     await ownerScopedTable("resume", ownerId)
       .delete()
       .eq("id", newResume!.id)
-      .then(() => undefined, () => undefined);
+      .then(
+        () => undefined,
+        () => undefined,
+      );
     if (err instanceof CompositionError) {
-      return NextResponse.json({ error: err.message }, { status: compositionErrorStatus(err.code) });
+      return NextResponse.json(
+        { error: err.message },
+        { status: compositionErrorStatus(err.code) },
+      );
     }
     throw err;
   }

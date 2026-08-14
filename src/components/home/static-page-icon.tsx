@@ -4,7 +4,11 @@ import { useDraggable } from "@dnd-kit/core";
 import { DocumentGlyph } from "@/components/home/resume-icon";
 import { FolderGlyph } from "@/components/home/folder-icon";
 import { STATIC_PAGE_DRAG_PREFIX } from "@/components/home/desktop-dnd-ids";
-import { DesktopIconSlot, IconGlyphButton, IconLabel } from "@/components/home/desktop-icon";
+import {
+  DesktopIconSlot,
+  IconGlyphButton,
+  IconLabel,
+} from "@/components/home/desktop-icon";
 
 // Same select/open interaction as ResumeIcon/FolderIcon, but there's no
 // route to navigate to — opening one just switches Desktop into its own
@@ -32,9 +36,10 @@ export function StaticPageIcon({
   onSelect: () => void;
   onOpen: () => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: STATIC_PAGE_DRAG_PREFIX + id,
-  });
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: STATIC_PAGE_DRAG_PREFIX + id,
+    });
 
   function select() {
     if (!isDragging) onSelect();
@@ -44,7 +49,13 @@ export function StaticPageIcon({
   }
 
   return (
-    <DesktopIconSlot x={x} y={y} transform={transform} isDragging={isDragging} setRef={setNodeRef}>
+    <DesktopIconSlot
+      x={x}
+      y={y}
+      transform={transform}
+      isDragging={isDragging}
+      setRef={setNodeRef}
+    >
       <IconGlyphButton
         onSelect={select}
         onOpen={open}
@@ -53,12 +64,21 @@ export function StaticPageIcon({
         dragProps={{ ...listeners, ...attributes }}
       >
         {glyph === "folder" ? (
-          <FolderGlyph hasContents={hasContents ?? false} isOver={false} color="warn" />
+          <FolderGlyph
+            hasContents={hasContents ?? false}
+            isOver={false}
+            color="warn"
+          />
         ) : (
           <DocumentGlyph />
         )}
       </IconGlyphButton>
-      <IconLabel title={title} selected={selected} onSelect={select} onOpen={open} />
+      <IconLabel
+        title={title}
+        selected={selected}
+        onSelect={select}
+        onOpen={open}
+      />
     </DesktopIconSlot>
   );
 }

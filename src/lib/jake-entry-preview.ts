@@ -6,7 +6,10 @@
 
 // str[start] must be "{". Returns the group's inner content and the index
 // just past its closing brace (matching depth, so nested braces are safe).
-export function readBraceGroup(str: string, start: number): { content: string; end: number } {
+export function readBraceGroup(
+  str: string,
+  start: number,
+): { content: string; end: number } {
   let depth = 0;
   let i = start;
   for (; i < str.length; i++) {
@@ -212,18 +215,27 @@ export function extractItems(latex: string): string[] {
 // list into one arg: \textbf{Name} $|$ \emph{Skill, Skill, Skill}. Pull the
 // bold part out as the title and the emph part out as its own line — a
 // naive whole-string clean concatenates them into one run-on title.
-export function extractMacroArg(text: string, macro: string): string | undefined {
+export function extractMacroArg(
+  text: string,
+  macro: string,
+): string | undefined {
   const idx = text.indexOf(`\\${macro}`);
   if (idx === -1) return undefined;
   const [arg] = readBalancedArgs(text.slice(idx + macro.length + 1), 1);
   return arg;
 }
 
-export function parseProjectTitle(titleLine: string): { title: string; meta?: string } {
+export function parseProjectTitle(titleLine: string): {
+  title: string;
+  meta?: string;
+} {
   const bold = extractMacroArg(titleLine, "textbf");
   if (bold === undefined) return { title: cleanLatexText(titleLine) };
   const emph = extractMacroArg(titleLine, "emph");
-  return { title: cleanLatexText(bold), meta: emph !== undefined ? cleanLatexText(emph) : undefined };
+  return {
+    title: cleanLatexText(bold),
+    meta: emph !== undefined ? cleanLatexText(emph) : undefined,
+  };
 }
 
 export interface EntryPreview {

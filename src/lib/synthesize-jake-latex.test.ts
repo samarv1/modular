@@ -5,7 +5,10 @@ import type { ResumeExtraction } from "./resume-extraction-schema";
 import { escapeLatex, synthesizeJakeLatex } from "./synthesize-jake-latex";
 
 const sample: ResumeExtraction = {
-  header: { name: "Jane Doe", contactLine: "jane@x.com | 555-123-4567 | linkedin.com/in/jane" },
+  header: {
+    name: "Jane Doe",
+    contactLine: "jane@x.com | 555-123-4567 | linkedin.com/in/jane",
+  },
   sections: [
     {
       title: "Education",
@@ -31,7 +34,10 @@ const sample: ResumeExtraction = {
           date: "June 2024 -- Present",
           organization: "Acme Corp",
           location: "Remote",
-          bullets: ["Built a service with 99.9% uptime", "Cut infra costs by 20%"],
+          bullets: [
+            "Built a service with 99.9% uptime",
+            "Cut infra costs by 20%",
+          ],
         },
       ],
     },
@@ -73,17 +79,29 @@ describe("synthesizeJakeLatex", () => {
     const extracted = extractJakeResume(source);
 
     const titles = extracted.sections.map((s) => s.title);
-    expect(titles).toEqual(["Name & Contact", "Education", "Experience", "Projects", "Technical Skills"]);
+    expect(titles).toEqual([
+      "Name & Contact",
+      "Education",
+      "Experience",
+      "Projects",
+      "Technical Skills",
+    ]);
 
-    const experience = extracted.sections.find((s) => s.title === "Experience")!;
+    const experience = extracted.sections.find(
+      (s) => s.title === "Experience",
+    )!;
     expect(experience.entries).toHaveLength(1);
     expect(experience.entries[0].kind).toBe("subheading_entry");
-    expect(experience.entries[0].rawLatex).toContain("Built a service with 99.9\\% uptime");
+    expect(experience.entries[0].rawLatex).toContain(
+      "Built a service with 99.9\\% uptime",
+    );
 
     const projects = extracted.sections.find((s) => s.title === "Projects")!;
     expect(projects.entries[0].kind).toBe("project_entry");
 
-    const skills = extracted.sections.find((s) => s.title === "Technical Skills")!;
+    const skills = extracted.sections.find(
+      (s) => s.title === "Technical Skills",
+    )!;
     expect(skills.entries).toHaveLength(1);
     expect(skills.entries[0].kind).toBe("section_chunk");
   });
@@ -102,7 +120,9 @@ describe("synthesizeJakeLatex", () => {
               date: "2024",
               organization: "R&D Labs #1",
               location: "Remote",
-              bullets: ["Cut costs by 20% ($5k/mo), used C# & ~50% less memory"],
+              bullets: [
+                "Cut costs by 20% ($5k/mo), used C# & ~50% less memory",
+              ],
             },
           ],
         },
@@ -113,7 +133,8 @@ describe("synthesizeJakeLatex", () => {
     expect(checkJakeContract(source).compatible).toBe(true);
 
     const extracted = extractJakeResume(source);
-    const entry = extracted.sections.find((s) => s.title === "Experience")!.entries[0];
+    const entry = extracted.sections.find((s) => s.title === "Experience")!
+      .entries[0];
     expect(entry.rawLatex).toContain("R\\&D Labs \\#1");
     expect(entry.rawLatex).toContain("20\\% (\\$5k/mo)");
     expect(entry.rawLatex).toContain("C\\#");

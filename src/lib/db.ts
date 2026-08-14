@@ -26,8 +26,11 @@ export function ownerScopedTable(table: string, ownerId: string) {
     // cleanly. Query results are effectively `any` here — callers own the
     // shape they expect back.
     select: (columns: string = "*") =>
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client.from(table).select(columns as any).eq("owner_id", ownerId),
+      client
+        .from(table)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .select(columns as any)
+        .eq("owner_id", ownerId),
     insert: (values: Record<string, unknown> | Record<string, unknown>[]) => {
       const rows = Array.isArray(values) ? values : [values];
       return client

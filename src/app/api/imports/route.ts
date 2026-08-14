@@ -4,7 +4,10 @@ import { getOwnerId } from "@/lib/owner";
 import { detectAdapter } from "@/lib/adapters/registry";
 import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
-import { extractResumeStructure, ResumeExtractionError } from "@/lib/resume-extraction";
+import {
+  extractResumeStructure,
+  ResumeExtractionError,
+} from "@/lib/resume-extraction";
 import { synthesizeJakeArchive } from "@/lib/synthesize-jake-archive";
 import {
   applyOverrides,
@@ -17,7 +20,10 @@ import {
 export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
   if (!form) {
-    return NextResponse.json({ error: "body must be multipart form data" }, { status: 400 });
+    return NextResponse.json(
+      { error: "body must be multipart form data" },
+      { status: 400 },
+    );
   }
   const file = form.get("file");
   if (!(file instanceof File)) {
@@ -32,7 +38,9 @@ export async function POST(request: Request) {
   const mode = form.get("mode") === "preview" ? "preview" : "commit";
   const ownerId = await getOwnerId();
 
-  let zipBytes: Uint8Array<ArrayBufferLike> = new Uint8Array(await file.arrayBuffer());
+  let zipBytes: Uint8Array<ArrayBufferLike> = new Uint8Array(
+    await file.arrayBuffer(),
+  );
 
   let archive;
   try {
@@ -72,7 +80,10 @@ export async function POST(request: Request) {
     result = converted.result;
   }
 
-  const extracted = adapter.extract({ rootFile: archive.rootFile, source: archive.source });
+  const extracted = adapter.extract({
+    rootFile: archive.rootFile,
+    source: archive.source,
+  });
   const flatEntries = flattenEntries(extracted);
   if (flatEntries.length === 0) {
     return NextResponse.json(
@@ -85,10 +96,8 @@ export async function POST(request: Request) {
     // Pure parse/extract — no storage upload, no DB writes, so there's
     // nothing to clean up if the user cancels the review modal. Duplicate
     // flags are informational only (dedup itself still runs at commit time).
-    const { data: existingLatex, error: existingLatexError } = await ownerScopedTable(
-      "bank_entry",
-      ownerId,
-    ).select("raw_latex");
+    const { data: existingLatex, error: existingLatexError } =
+      await ownerScopedTable("bank_entry", ownerId).select("raw_latex");
     if (existingLatexError) throw new Error(existingLatexError.message);
     const existingNormalized = new Set(
       ((existingLatex ?? []) as unknown as { raw_latex: string }[]).map((row) =>
@@ -139,7 +148,8 @@ export async function POST(request: Request) {
     extracted,
     finalEntries,
     forceIncludeIndices,
-    desiredDisplayName: file.name.replace(/\.zip$/i, "").trim() || "Imported resume",
+    desiredDisplayName:
+      file.name.replace(/\.zip$/i, "").trim() || "Imported resume",
   });
 
   return NextResponse.json(commitResult);
@@ -159,7 +169,8 @@ async function tryConvertViaAi(latexSource: string) {
   // structurally broken.
   let zipBytes, archive, adapter, result;
   try {
-    ({ zipBytes, archive, adapter, result } = await synthesizeJakeArchive(extraction));
+    ({ zipBytes, archive, adapter, result } =
+      await synthesizeJakeArchive(extraction));
   } catch {
     return null;
   }
