@@ -1,9 +1,12 @@
+import JSZip from "jszip";
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
 import { detectAdapter } from "@/lib/adapters/registry";
 import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
+import { extractResumeStructure, ResumeExtractionError } from "@/lib/resume-extraction";
+import { synthesizeJakeLatex } from "@/lib/synthesize-jake-latex";
 import {
   applyOverrides,
   commitImport,
@@ -11,6 +14,8 @@ import {
   normalizeLatex,
   parseOverrides,
 } from "@/lib/import-commit";
+
+const SYNTHETIC_ROOT_FILE = "resume.tex";
 
 export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
@@ -30,7 +35,7 @@ export async function POST(request: Request) {
   const mode = form.get("mode") === "preview" ? "preview" : "commit";
   const ownerId = await getOwnerId();
 
-  const zipBytes = new Uint8Array(await file.arrayBuffer());
+  let zipBytes: Uint8Array<ArrayBufferLike> = new Uint8Array(await file.arrayBuffer());
 
   let archive;
   try {
@@ -45,18 +50,29 @@ export async function POST(request: Request) {
     throw err;
   }
 
-  const { adapter, result } = detectAdapter({
+  let { adapter, result } = detectAdapter({
     rootFile: archive.rootFile,
     source: archive.source,
   });
 
   if (!adapter || !result.compatible) {
-    // Not persisted — an incompatible upload was never really "imported"
-    // (see PLAN.md Phase 3 notes). The client gets the mismatch report only.
-    return NextResponse.json(
-      { compatible: false, mismatchReport: result.mismatchReport },
-      { status: 422 },
-    );
+    // Not Jake's template: try converting via AI instead of rejecting outright.
+    // Raw LaTeX -> structured JSON -> re-synthesized Jake's-template LaTeX,
+    // then re-run through the same detection so a successful conversion
+    // falls through the normal path below indistinguishably from a native
+    // Jake upload. If the AI can't make sense of it either, fall back to the
+    // original mismatch report.
+    const converted = await tryConvertViaAi(archive.source);
+    if (!converted) {
+      return NextResponse.json(
+        { compatible: false, mismatchReport: result.mismatchReport },
+        { status: 422 },
+      );
+    }
+    zipBytes = converted.zipBytes;
+    archive = converted.archive;
+    adapter = converted.adapter;
+    result = converted.result;
   }
 
   const extracted = adapter.extract({ rootFile: archive.rootFile, source: archive.source });
@@ -130,4 +146,33 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json(commitResult);
+}
+
+async function tryConvertViaAi(latexSource: string) {
+  let extraction;
+  try {
+    extraction = await extractResumeStructure(latexSource);
+  } catch (err) {
+    if (err instanceof ResumeExtractionError) return null;
+    throw err;
+  }
+
+  const source = synthesizeJakeLatex(extraction);
+  const zip = new JSZip();
+  zip.file(SYNTHETIC_ROOT_FILE, source);
+  const zipBytes = await zip.generateAsync({ type: "uint8array" });
+
+  // Backstop, not expected to fail: the canonical preamble always satisfies
+  // the contract, so this only trips if the serializer produced something
+  // structurally broken.
+  let archive;
+  try {
+    archive = await parseLatexArchive(zipBytes);
+  } catch {
+    return null;
+  }
+  const { adapter, result } = detectAdapter({ rootFile: archive.rootFile, source: archive.source });
+  if (!adapter || !result.compatible) return null;
+
+  return { zipBytes, archive, adapter, result };
 }

@@ -38,7 +38,7 @@ const EXAMPLE_SHAPE = `{
   ]
 }`;
 
-const SYSTEM_PROMPT = `You turn a resume (given as markdown, extracted from a PDF) into structured data. Respond with ONLY a single JSON object matching this exact shape, no other text, no markdown code fences:
+const SYSTEM_PROMPT = `You turn a resume (given as either markdown extracted from a PDF, or raw LaTeX source) into structured data. If given LaTeX, ignore preamble/formatting commands and read the document body for content. Respond with ONLY a single JSON object matching this exact shape, no other text, no markdown code fences:
 ${EXAMPLE_SHAPE}
 
 Rules:

@@ -99,7 +99,9 @@ export const UploadZone = forwardRef<
             browse
           </button>
         </div>
-        <span className="text-[10.5px] text-muted-fg">ZIP imports faster and keeps your exact formatting</span>
+        <span className="text-[10.5px] text-muted-fg">
+          Jake's Resume template ZIPs import faster and keep your exact formatting
+        </span>
       </div>
       {input}
     </div>

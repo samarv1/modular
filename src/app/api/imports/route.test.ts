@@ -6,9 +6,11 @@ import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
 import { ownerScopedTable } from "@/lib/db";
 
 // Route handlers now resolve ownerId from a real Supabase Auth session
-// (src/lib/owner.ts), which isn't available in this test environment —
-// stand in with the same fixed test owner id the live-DB fixtures below use.
-const testOwnerId = process.env.MODULAR_OWNER_ID!;
+// (src/lib/owner.ts), which isn't available in this test environment. These
+// tests hit the live Supabase project directly (owner_id has an auth.users
+// FK, see 0007_auth_owner_fk.sql), so TEST_OWNER_ID must be a real signed-in
+// user's id, not an arbitrary UUID — set it in .env to run this file.
+const testOwnerId = process.env.TEST_OWNER_ID!;
 vi.mock("@/lib/owner", () => ({ getOwnerId: async () => testOwnerId }));
 
 vi.mock("@/lib/storage", () => ({
@@ -16,9 +18,25 @@ vi.mock("@/lib/storage", () => ({
   deleteArchive: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Import after the mock above is registered so the route picks it up.
+// The AI fallback for non-Jake zips hits a real model call, which is both
+// slow and non-deterministic here — mock it out. Defaults to "can't make
+// sense of this", matching the old pre-AI-fallback 422 behavior; individual
+// tests override this to exercise the successful-conversion path.
+vi.mock("@/lib/resume-extraction", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/resume-extraction")>("@/lib/resume-extraction");
+  return {
+    ...actual,
+    extractResumeStructure: vi
+      .fn()
+      .mockRejectedValue(new actual.ResumeExtractionError("mock: not a resume")),
+  };
+});
+
+// Import after the mocks above are registered so the route picks them up.
 const { POST } = await import("./route");
 const { uploadArchive } = await import("@/lib/storage");
+const { extractResumeStructure } = await import("@/lib/resume-extraction");
 
 const fixture = readFileSync(
   join(__dirname, "../../../../fixtures/jakes-resume/resume.tex"),
@@ -119,7 +137,7 @@ describe("POST /api/imports — duplicate entry detection", () => {
       .select("raw_latex")
       .in("source_resume_id", sourceResumeIds);
     if (error) throw new Error(error.message);
-    const rawLatexValues = (allEntries ?? []).map((row) => (row as { raw_latex: string }).raw_latex);
+    const rawLatexValues = (allEntries ?? []).map((row) => (row as unknown as { raw_latex: string }).raw_latex);
     expect(new Set(rawLatexValues).size).toBe(rawLatexValues.length);
   });
 
@@ -167,6 +185,63 @@ describe("POST /api/imports — preview mode", () => {
     const bytes = await zip.generateAsync({ type: "arraybuffer" });
     const file = new File([bytes], "mismatch.zip");
     const res = await POST(requestWithFile(file, { mode: "preview" }));
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.compatible).toBe(false);
+    expect(body.mismatchReport).toBeDefined();
+    expect(uploadArchive).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/imports — AI fallback for non-Jake zips", () => {
+  const sourceResumeIds: string[] = [];
+  let templateShellId: string | undefined;
+
+  afterAll(async () => {
+    for (const id of sourceResumeIds) {
+      await ownerScopedTable("bank_entry", testOwnerId).delete().eq("source_resume_id", id);
+      await ownerScopedTable("source_resume", testOwnerId).delete().eq("id", id);
+    }
+    if (templateShellId) {
+      await ownerScopedTable("template_shell", testOwnerId).delete().eq("id", templateShellId);
+    }
+  });
+
+  it("silently converts a non-Jake zip via AI and commits it like a native upload", async () => {
+    vi.mocked(extractResumeStructure).mockResolvedValueOnce({
+      header: { name: "Jane Doe", contactLine: "jane@example.com" },
+      sections: [
+        {
+          title: "Technical Skills",
+          entries: [
+            { kind: "section_chunk", sourceSection: "Technical Skills", items: ["Languages: TypeScript"] },
+          ],
+        },
+      ],
+    });
+
+    const zip = new JSZip();
+    zip.file("resume.tex", "\\documentclass{article}\\begin{document}not jake\\end{document}");
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const file = new File([bytes], "not-jake.zip");
+
+    const res = await POST(requestWithFile(file));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.compatible).toBe(true);
+    expect(body.entryCount).toBeGreaterThan(0);
+    sourceResumeIds.push(body.sourceResumeId);
+    templateShellId = body.templateShellId;
+  });
+
+  it("still 422s with the original mismatch report when AI conversion also fails", async () => {
+    vi.mocked(uploadArchive).mockClear();
+    const zip = new JSZip();
+    zip.file("resume.tex", "\\documentclass{article}\\begin{document}not jake\\end{document}");
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const file = new File([bytes], "not-jake-2.zip");
+
+    const res = await POST(requestWithFile(file));
     expect(res.status).toBe(422);
     const body = await res.json();
     expect(body.compatible).toBe(false);
