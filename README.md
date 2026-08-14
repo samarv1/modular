@@ -10,13 +10,13 @@ Tailoring a resume per application usually means duplicating a file and hand-edi
 
 ## How it works
 
-**Import.** Upload a resume as a ZIP (LaTeX source) or a PDF. If the ZIP already matches the [Jake's Resume](https://github.com/jakegut/resume) template family, it's parsed directly: every `\resumeSubheading`, `\resumeProjectHeading`, and section body becomes its own bank entry. Otherwise it goes through Gemini instead of getting rejected: a PDF is converted to markdown text first (via markitdown), while a ZIP in some other template hands over its raw LaTeX source as-is. Either way, Gemini restructures that text into the same entry shape, a synthesizer regenerates it as Jake's-template-compliant LaTeX, and it's run back through the same parser. Every import path ends up in the same bank.
+**Import.** Upload a resume as a ZIP (LaTeX source) or a PDF. If the ZIP already matches the [Jake's Resume](https://github.com/jakegut/resume) template family, it's parsed directly: every `\resumeSubheading`, `\resumeProjectHeading`, and section body becomes its own bank entry. Otherwise it goes through Gemini instead of getting rejected: a PDF is converted to markdown text first (via markitdown), while a ZIP in some other template hands over its raw LaTeX source as-is. Gemini restructures that text into the same entry shape, a synthesizer regenerates it as Jake's-template-compliant LaTeX, and it's run back through the same parser. Every import path ends up in the same bank.
 
 **Bank.** Every imported entry is edited through structured fields (title, org, dates, bullets), not raw LaTeX. Editing a field regenerates that entry's LaTeX on save.
 
 **Compose.** A resume is built by dragging bank entries into sections, in a three-pane editor: the searchable bank on one side, the resume outline in the middle, a live compiled preview on the other side. Entries can be reordered, moved between sections, or pulled in from any past import, not just the one that originally contributed them.
 
-**Compile.** Every resume has one designated template shell, whose LaTeX preamble is the base. If an entry dragged in from a different import needs a package the shell doesn't already declare, that `\usepackage` line is appended automatically, so mixing entries from different original resumes doesn't produce a document with a missing package. Compilation itself runs in an ephemeral Vercel Sandbox booted from a pre-built TeX Live snapshot, running `pdflatex` twice to resolve cross-references before returning the compiled PDF.
+**Compile.** Every resume has one designated template shell, whose LaTeX preamble is the base. Compilation itself runs in an ephemeral Vercel Sandbox booted from a pre-built TeX Live snapshot, running `pdflatex` twice to resolve cross-references before returning the compiled PDF.
 
 **Export.** A finished one-page resume exports as either the compiled PDF or a full LaTeX ZIP, rebuilt from the original template's assets.
 
