@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { EntryEditor, HeaderFieldsEditor } from "@/components/bank/entry-editor";
@@ -99,16 +100,20 @@ export function PdfImportBody({
         onImported(body.entries ?? []);
         return;
       }
-      setErrorMessage(typeof body?.error === "string" ? body.error : "import failed, try again");
+      setErrorMessage(typeof body?.error === "string" ? body.error : "upload failed, try again");
       setPhase("review");
     } catch {
-      setErrorMessage("import failed, try again");
+      setErrorMessage("upload failed, try again");
       setPhase("review");
     }
   }
 
   if (phase === "loading") {
-    return <div className="py-8 text-center text-[12.5px] text-faint">Reading your PDF…</div>;
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="size-4 animate-spin text-faint" />
+      </div>
+    );
   }
 
   if (!extraction) {
@@ -127,7 +132,7 @@ export function PdfImportBody({
   return (
     <>
       <div className="text-[11.5px] text-faint">
-        {`Extracted ${extraction.sections.length} section${extraction.sections.length === 1 ? "" : "s"}, ${entryCount} entr${entryCount === 1 ? "y" : "ies"}. Review and edit before importing — AI extraction can misread dates or group bullets incorrectly.`}
+        {`Extracted ${extraction.sections.length} section${extraction.sections.length === 1 ? "" : "s"}, ${entryCount} entr${entryCount === 1 ? "y" : "ies"}. Review and edit before uploading (AI extraction can misread dates or group bullets incorrectly).`}
       </div>
 
       <div className="flex max-h-[45vh] flex-col gap-4 overflow-y-auto pr-1 [scrollbar-gutter:stable]">
@@ -167,7 +172,7 @@ export function PdfImportBody({
           Cancel
         </Button>
         <Button onClick={commit} disabled={phase === "committing" || entryCount === 0}>
-          {phase === "committing" ? "Importing…" : `Approve (${entryCount})`}
+          {phase === "committing" ? <Loader2 className="size-3.5 animate-spin" /> : `Approve (${entryCount})`}
         </Button>
       </DialogFooter>
     </>

@@ -38,12 +38,9 @@ import {
   STATIC_PAGE_DRAG_PREFIX,
 } from "@/components/home/desktop-dnd-ids";
 import type { ResumeFolderRow, ResumeRow, SourceResumeRow } from "@/lib/rows";
-import { nextPlacement } from "@/lib/desktop-placement";
+import { nextPlacement, nextFreePlacement } from "@/lib/desktop-placement";
 import { STATIC_PAGES } from "@/lib/static-pages";
-
-function pagePositionKey(id: string) {
-  return `desktop-page-position:${id}`;
-}
+import { pagePositionKey } from "@/lib/static-page-position";
 
 // Same select-on-click, open-on-double-click pattern as ResumeIcon, minus
 // drag (bank uploads aren't repositionable/foldered, just a plain list).
@@ -235,6 +232,23 @@ export function Desktop({
     window.localStorage.setItem(pagePositionKey(id), JSON.stringify({ x, y }));
   }
 
+  // What's actually occupying the desktop's top-level grid right now — static
+  // pages, folders, and top-level resumes — for nextFreePlacement to scan
+  // against, rather than trusting a count of how many items we think exist.
+  function occupiedRootPositions(): { x: number; y: number }[] {
+    return [
+      ...STATIC_PAGES.map((page) => pagePositions[page.id]).filter(
+        (p): p is { x: number; y: number } => !!p,
+      ),
+      ...folders.map((f) => ({ x: f.position_x, y: f.position_y })),
+      ...resumes.filter((r) => r.folder_id === null).map((r) => ({ x: r.position_x, y: r.position_y })),
+    ];
+  }
+
+  function occupiedFolderPositions(folderId: string): { x: number; y: number }[] {
+    return resumes.filter((r) => r.folder_id === folderId).map((r) => ({ x: r.position_x, y: r.position_y }));
+  }
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const visibleFolders = currentFolderId === null ? folders : [];
@@ -321,8 +335,7 @@ export function Desktop({
 
       if (overId?.startsWith(FOLDER_DROP_PREFIX)) {
         const folderId = overId.slice(FOLDER_DROP_PREFIX.length);
-        const contents = resumes.filter((r) => (r.folder_id ?? null) === folderId);
-        const pos = nextPlacement(contents.length);
+        const pos = nextFreePlacement(occupiedFolderPositions(folderId));
         setResumes((cur) =>
           cur.map((r) => (r.id === resumeId ? { ...r, folder_id: folderId, position_x: pos.x, position_y: pos.y } : r)),
         );
@@ -334,8 +347,7 @@ export function Desktop({
         return;
       }
       if (overId === DESKTOP_BACK_DROP_ID) {
-        const topLevel = resumes.filter((r) => r.folder_id === null);
-        const pos = nextPlacement(STATIC_PAGES.length + folders.length + topLevel.length);
+        const pos = nextFreePlacement(occupiedRootPositions());
         setResumes((cur) =>
           cur.map((r) => (r.id === resumeId ? { ...r, folder_id: null, position_x: pos.x, position_y: pos.y } : r)),
         );
@@ -379,8 +391,7 @@ export function Desktop({
   }
 
   async function createFolder() {
-    const topLevel = resumes.filter((r) => r.folder_id === null);
-    const pos = nextPlacement(STATIC_PAGES.length + folders.length + topLevel.length);
+    const pos = nextFreePlacement(occupiedRootPositions());
     try {
       const res = await fetch("/api/folders", {
         method: "POST",
@@ -471,17 +482,16 @@ export function Desktop({
   // inside a folder drops the new resume straight into it, not onto the
   // desktop underneath.
   async function createResume() {
-    const containerCount =
-      currentFolderId === null
-        ? STATIC_PAGES.length + resumes.filter((r) => r.folder_id === null).length + folders.length
-        : resumes.filter((r) => r.folder_id === currentFolderId).length;
-    const pos = nextPlacement(containerCount);
     if (!templateShellAvailable) {
-      const params = new URLSearchParams({ positionX: String(pos.x), positionY: String(pos.y) });
+      const params = new URLSearchParams();
       if (currentFolderId) params.set("folderId", currentFolderId);
-      router.push(`/resume/new?${params.toString()}`);
+      const query = params.toString();
+      router.push(`/resume/new${query ? `?${query}` : ""}`);
       return;
     }
+    const pos = nextFreePlacement(
+      currentFolderId === null ? occupiedRootPositions() : occupiedFolderPositions(currentFolderId),
+    );
     try {
       const res = await fetch("/api/resumes", {
         method: "POST",
@@ -551,7 +561,7 @@ export function Desktop({
             <div className="h-6 w-px bg-line" />
             <ToolbarButton
               icon={Upload}
-              label="Import"
+              label="Upload"
               onClick={() => {
                 setEditingSourceResume(null);
                 setImportModalOpen(true);

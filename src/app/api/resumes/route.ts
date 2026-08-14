@@ -46,14 +46,20 @@ export async function POST(request: Request) {
 
   const fieldError = integerFieldError(body, ["positionX", "positionY"]) ?? nullableStringFieldError(body, "folderId");
   if (fieldError) return fieldError;
+  if (typeof body.positionX !== "number" || typeof body.positionY !== "number") {
+    // Every caller (Desktop's "New resume", the empty-bank shell) computes an
+    // occupancy-checked position before POSTing — a missing one means the
+    // caller has a bug, not that (0,0) is a reasonable fallback. (0,0) sits
+    // on top of the desktop's first icon, so silently defaulting to it here
+    // used to produce icons stacked on top of each other.
+    return NextResponse.json({ error: "positionX and positionY are required" }, { status: 400 });
+  }
 
   // Desktop placement (Phase 6) — the caller (Desktop's "New resume") computes
-  // where the icon should land, and which folder (if any) it should land in;
-  // omitted position defaults to the position_x/position_y column defaults
-  // (0,0), same as any other insert.
+  // where the icon should land, and which folder (if any) it should land in.
   const position = {
-    positionX: typeof body.positionX === "number" ? body.positionX : undefined,
-    positionY: typeof body.positionY === "number" ? body.positionY : undefined,
+    positionX: body.positionX,
+    positionY: body.positionY,
     folderId: body.folderId === null || typeof body.folderId === "string" ? body.folderId : undefined,
   };
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -94,7 +95,6 @@ export function ImportReviewModal({
   }
 
   function close() {
-    reset();
     onOpenChange(false);
   }
 
@@ -183,10 +183,10 @@ export function ImportReviewModal({
         close();
         return;
       }
-      setErrorMessage(typeof body?.error === "string" ? body.error : "import failed, try again");
+      setErrorMessage(typeof body?.error === "string" ? body.error : "upload failed, try again");
       setPhase("review");
     } catch {
-      setErrorMessage("import failed, try again");
+      setErrorMessage("upload failed, try again");
       setPhase("review");
     }
   }
@@ -197,6 +197,9 @@ export function ImportReviewModal({
       onOpenChange={(next) => {
         if (!next) close();
       }}
+      onOpenChangeComplete={(next) => {
+        if (!next) reset();
+      }}
     >
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[640px]" showCloseButton={phase !== "committing"}>
         <DialogHeader>
@@ -204,8 +207,8 @@ export function ImportReviewModal({
             {editSourceResume
               ? `Edit "${editSourceResume.displayName}"`
               : phase === "pdf"
-                ? "Review PDF import"
-                : "Review import"}
+                ? "Review PDF upload"
+                : "Review upload"}
           </DialogTitle>
         </DialogHeader>
 
@@ -239,7 +242,9 @@ export function ImportReviewModal({
             )}
 
             {phase === "loading" && (
-              <div className="py-8 text-center text-[12.5px] text-faint">Parsing your resume…</div>
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="size-4 animate-spin text-faint" />
+              </div>
             )}
 
             {phase === "mismatch" && mismatchReport && (
@@ -304,7 +309,11 @@ export function ImportReviewModal({
                     Cancel
                   </Button>
                   <Button onClick={commitImport} disabled={phase === "committing" || includedCount === 0}>
-                    {phase === "committing" ? "Importing…" : `Approve (${includedCount})`}
+                    {phase === "committing" ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      `Approve (${includedCount})`
+                    )}
                   </Button>
                 </DialogFooter>
               </>

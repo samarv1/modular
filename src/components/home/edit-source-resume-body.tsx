@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { EntryEditor, HeaderFieldsEditor } from "@/components/bank/entry-editor";
@@ -134,7 +135,11 @@ export function EditSourceResumeBody({
   }
 
   if (phase === "loading") {
-    return <div className="py-8 text-center text-[12.5px] text-faint">Loading…</div>;
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="size-4 animate-spin text-faint" />
+      </div>
+    );
   }
 
   if (!headerDraft && entries.length === 0) {
@@ -185,7 +190,7 @@ export function EditSourceResumeBody({
           Cancel
         </Button>
         <Button onClick={save} disabled={phase === "saving" || !dirty}>
-          {phase === "saving" ? "Saving…" : "Save changes"}
+          {phase === "saving" ? <Loader2 className="size-3.5 animate-spin" /> : "Save changes"}
         </Button>
       </DialogFooter>
     </>
