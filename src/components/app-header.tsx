@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 // Top bar for the home/desktop page (its only caller). "Modular" is static
@@ -20,9 +21,14 @@ export function AppHeader() {
       <span className="font-mono text-lg font-semibold uppercase tracking-tight">
         Modular
       </span>
-      <Button variant="ghost" size="sm" onClick={signOut}>
-        Sign out
-      </Button>
+      <div className="flex items-center gap-1">
+        <Button variant="ghost" size="sm" render={<Link href="/settings" />}>
+          Settings
+        </Button>
+        <Button variant="ghost" size="sm" onClick={signOut}>
+          Sign out
+        </Button>
+      </div>
     </div>
   );
 }

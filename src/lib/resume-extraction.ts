@@ -1,15 +1,26 @@
-import { generateText, APICallError, RetryError } from "ai";
-import { google } from "@ai-sdk/google";
+import { generateText, APICallError, RetryError, type LanguageModel } from "ai";
+import { google, createGoogleGenerativeAI } from "@ai-sdk/google";
 import {
   ResumeExtractionSchema,
   type ResumeExtraction,
 } from "./resume-extraction-schema";
 
+const GEMINI_MODEL_ID = "gemini-3.5-flash";
+
 // Direct Google provider rather than the Vercel AI Gateway: the Gateway
 // requires a card on file on the Vercel team before it'll serve any model
 // request, while a Google AI Studio API key (GOOGLE_GENERATIVE_AI_API_KEY)
 // works on Gemini's free tier with no card.
-const MODEL = google("gemini-3.5-flash");
+const MODEL = google(GEMINI_MODEL_ID);
+
+export interface ByokConfig {
+  apiKey: string;
+}
+
+function resolveModel(byok: ByokConfig | undefined): LanguageModel {
+  if (!byok) return MODEL;
+  return createGoogleGenerativeAI({ apiKey: byok.apiKey })(GEMINI_MODEL_ID);
+}
 
 // Schema described in the prompt and parsed/validated with Zod ourselves,
 // rather than passed as a native `responseSchema` via `Output.object` —
@@ -55,6 +66,12 @@ Rules:
 
 export class ResumeExtractionError extends Error {}
 
+// Distinct from ResumeExtractionError so callers can tell "the caller's own
+// BYOK key was rejected by the provider" apart from "the shared service is
+// down/rate-limited", since the two need different handling (no fallback to
+// the shared key on an auth failure).
+export class ResumeExtractionAuthError extends Error {}
+
 function stripCodeFences(text: string): string {
   return text
     .trim()
@@ -62,8 +79,51 @@ function stripCodeFences(text: string): string {
     .replace(/```$/, "");
 }
 
+// An auth failure arrives wrapped in a RetryError (one per retry attempt in
+// .errors) rather than as a bare APICallError, so both shapes need checking.
+// Google's Generative Language API rejects a bad key with 400
+// INVALID_ARGUMENT and an API_KEY_INVALID reason, not 401/403 (verified
+// against the real API, not just its docs), so check both shapes.
+function isAuthRejected(err: unknown): boolean {
+  const causes = RetryError.isInstance(err) ? err.errors : [err];
+  return causes.some((c) => {
+    if (!APICallError.isInstance(c)) return false;
+    if (c.statusCode === 401 || c.statusCode === 403) return true;
+    return (
+      c.statusCode === 400 &&
+      typeof c.responseBody === "string" &&
+      c.responseBody.includes("API_KEY_INVALID")
+    );
+  });
+}
+
+export type ByokValidationResult =
+  { valid: true } | { valid: false; reason: "invalid_key" | "check_failed" };
+
+// Settings-page "validate on save": a minimal, cheap call (1 output token)
+// against the caller's own key/account, so a typo'd key is caught
+// immediately rather than surfacing mid-import later.
+export async function validateByokKey(
+  byok: ByokConfig,
+): Promise<ByokValidationResult> {
+  try {
+    await generateText({
+      model: resolveModel(byok),
+      prompt: "ping",
+      maxOutputTokens: 1,
+    });
+    return { valid: true };
+  } catch (err) {
+    return {
+      valid: false,
+      reason: isAuthRejected(err) ? "invalid_key" : "check_failed",
+    };
+  }
+}
+
 export async function extractResumeStructure(
   markdown: string,
+  byok?: ByokConfig,
 ): Promise<ResumeExtraction> {
   // generateText's own retry loop still throws on a persistent failure (e.g.
   // the free-tier daily quota running out) — that arrives as an AI SDK error,
@@ -72,12 +132,17 @@ export async function extractResumeStructure(
   let text: string;
   try {
     ({ text } = await generateText({
-      model: MODEL,
+      model: resolveModel(byok),
       system: SYSTEM_PROMPT,
       prompt: markdown,
       maxOutputTokens: 16000,
     }));
   } catch (err) {
+    if (byok && isAuthRejected(err)) {
+      throw new ResumeExtractionAuthError(
+        "that API key was rejected by the provider",
+      );
+    }
     // A persistent 429 surfaces wrapped in a RetryError (one per retry
     // attempt in .errors), not as a bare APICallError, so both shapes need
     // checking.

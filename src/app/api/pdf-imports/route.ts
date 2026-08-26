@@ -6,12 +6,19 @@ import {
 } from "@/lib/pdf-to-markdown";
 import {
   extractResumeStructure,
+  ResumeExtractionAuthError,
   ResumeExtractionError,
 } from "@/lib/resume-extraction";
 import { ResumeExtractionSchema } from "@/lib/resume-extraction-schema";
 import { synthesizeJakeArchive } from "@/lib/synthesize-jake-archive";
 import { ArchiveRejectedError } from "@/lib/latex-archive";
 import { commitImport, flattenEntries } from "@/lib/import-commit";
+import {
+  assertUnderSharedKeyCap,
+  recordSharedKeyUsage,
+  SharedKeyCapExceededError,
+} from "@/lib/ai-usage";
+import { getByokKey, hasByokKey } from "@/lib/byok-store";
 
 const MAX_PDF_BYTES = 25 * 1024 * 1024;
 
@@ -46,6 +53,10 @@ export async function POST(request: Request) {
       );
     }
 
+    const byok = (await hasByokKey(ownerId))
+      ? { apiKey: (await getByokKey(ownerId))! }
+      : undefined;
+
     const pdfBytes = new Uint8Array(await file.arrayBuffer());
 
     let markdown: string;
@@ -61,15 +72,41 @@ export async function POST(request: Request) {
       throw err;
     }
 
+    if (!byok) {
+      try {
+        await assertUnderSharedKeyCap(ownerId);
+      } catch (err) {
+        if (err instanceof SharedKeyCapExceededError) {
+          return NextResponse.json(
+            {
+              error:
+                "you've used your shared AI extraction quota for this month",
+              code: "shared_key_cap_reached",
+            },
+            { status: 429 },
+          );
+        }
+        throw err;
+      }
+    }
+
     let extraction;
     try {
-      extraction = await extractResumeStructure(markdown);
+      extraction = await extractResumeStructure(markdown, byok);
     } catch (err) {
+      if (err instanceof ResumeExtractionAuthError) {
+        return NextResponse.json(
+          { error: err.message, code: "byok_key_rejected" },
+          { status: 401 },
+        );
+      }
       if (err instanceof ResumeExtractionError) {
         return NextResponse.json({ error: err.message }, { status: 422 });
       }
       throw err;
     }
+    if (!byok) await recordSharedKeyUsage(ownerId);
+
     return NextResponse.json({
       extraction,
       filenameHint: file.name.replace(/\.pdf$/i, "").trim(),

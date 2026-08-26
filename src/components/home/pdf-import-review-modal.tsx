@@ -13,6 +13,7 @@ import type {
   ResumeExtraction,
 } from "@/lib/resume-extraction-schema";
 import type { BankEntryRow } from "@/lib/rows";
+import { ImportErrorMessage } from "@/components/home/import-error-message";
 
 type Phase = "loading" | "review" | "committing";
 
@@ -67,6 +68,7 @@ export function PdfImportBody({
   const [extraction, setExtraction] = useState<ResumeExtraction | null>(null);
   const [filenameHint, setFilenameHint] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +84,12 @@ export function PdfImportBody({
         const body = await res.json().catch(() => null);
         if (cancelled) return;
         if (!res.ok || !body?.extraction) {
+          setErrorCode(
+            body?.code === "shared_key_cap_reached" ||
+              body?.code === "byok_key_rejected"
+              ? body.code
+              : undefined,
+          );
           setErrorMessage(
             typeof body?.error === "string"
               ? body.error
@@ -111,6 +119,7 @@ export function PdfImportBody({
     if (!extraction) return;
     setPhase("committing");
     setErrorMessage(null);
+    setErrorCode(undefined);
     try {
       const form = new FormData();
       form.set("mode", "commit");
@@ -149,7 +158,7 @@ export function PdfImportBody({
     return (
       <div className="flex flex-col gap-3">
         {errorMessage && (
-          <span className="text-[11.5px] text-danger">{errorMessage}</span>
+          <ImportErrorMessage message={errorMessage} code={errorCode} />
         )}
         <Button variant="outline" onClick={onCancel} className="self-start">
           Try another file
@@ -213,7 +222,7 @@ export function PdfImportBody({
       </div>
 
       {errorMessage && (
-        <span className="text-[11.5px] text-danger">{errorMessage}</span>
+        <ImportErrorMessage message={errorMessage} code={errorCode} />
       )}
 
       <DialogFooter>

@@ -6,7 +6,9 @@ import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
 import {
   extractResumeStructure,
+  ResumeExtractionAuthError,
   ResumeExtractionError,
+  type ByokConfig,
 } from "@/lib/resume-extraction";
 import { synthesizeJakeArchive } from "@/lib/synthesize-jake-archive";
 import {
@@ -16,6 +18,12 @@ import {
   normalizeLatex,
   parseOverrides,
 } from "@/lib/import-commit";
+import {
+  assertUnderSharedKeyCap,
+  recordSharedKeyUsage,
+  SharedKeyCapExceededError,
+} from "@/lib/ai-usage";
+import { getByokKey, hasByokKey } from "@/lib/byok-store";
 
 export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
@@ -60,6 +68,13 @@ export async function POST(request: Request) {
     source: archive.source,
   });
 
+  // Set when this request converts a non-Jake archive via AI, so the preview
+  // response can hand the converted zip back to the client, which re-uploads
+  // it verbatim for the commit request, so detectAdapter succeeds
+  // immediately there and tryConvertViaAi (and its Gemini call) never runs
+  // twice for the same import.
+  let convertedZipBytes: Uint8Array<ArrayBufferLike> | null = null;
+
   if (!adapter || !result.compatible) {
     // Not Jake's template: try converting via AI instead of rejecting outright.
     // Raw LaTeX -> structured JSON -> re-synthesized Jake's-template LaTeX,
@@ -67,7 +82,27 @@ export async function POST(request: Request) {
     // falls through the normal path below indistinguishably from a native
     // Jake upload. If the AI can't make sense of it either, fall back to the
     // original mismatch report.
-    const converted = await tryConvertViaAi(archive.source);
+    let converted;
+    try {
+      converted = await tryConvertViaAi(archive.source, ownerId);
+    } catch (err) {
+      if (err instanceof SharedKeyCapExceededError) {
+        return NextResponse.json(
+          {
+            error: "you've used your shared AI extraction quota for this month",
+            code: "shared_key_cap_reached",
+          },
+          { status: 429 },
+        );
+      }
+      if (err instanceof ResumeExtractionAuthError) {
+        return NextResponse.json(
+          { error: err.message, code: "byok_key_rejected" },
+          { status: 401 },
+        );
+      }
+      throw err;
+    }
     if (!converted) {
       return NextResponse.json(
         { compatible: false, mismatchReport: result.mismatchReport },
@@ -78,6 +113,7 @@ export async function POST(request: Request) {
     archive = converted.archive;
     adapter = converted.adapter;
     result = converted.result;
+    convertedZipBytes = converted.zipBytes;
   }
 
   const extracted = adapter.extract({
@@ -107,6 +143,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       compatible: true,
+      // Present only when this preview converted a non-Jake archive via AI:
+      // the client re-uploads these bytes for the commit request instead of
+      // the original file, so the archive doesn't need re-converting.
+      convertedArchive: convertedZipBytes
+        ? Buffer.from(convertedZipBytes).toString("base64")
+        : undefined,
       sections: extracted.sections.map((section) => ({
         title: section.title,
         entryCount: section.entries.length,
@@ -155,14 +197,20 @@ export async function POST(request: Request) {
   return NextResponse.json(commitResult);
 }
 
-async function tryConvertViaAi(latexSource: string) {
+async function tryConvertViaAi(latexSource: string, ownerId: string) {
+  const byok: ByokConfig | undefined = (await hasByokKey(ownerId))
+    ? { apiKey: (await getByokKey(ownerId))! }
+    : undefined;
+  if (!byok) await assertUnderSharedKeyCap(ownerId);
+
   let extraction;
   try {
-    extraction = await extractResumeStructure(latexSource);
+    extraction = await extractResumeStructure(latexSource, byok);
   } catch (err) {
     if (err instanceof ResumeExtractionError) return null;
     throw err;
   }
+  if (!byok) await recordSharedKeyUsage(ownerId);
 
   // Backstop, not expected to fail: the canonical preamble always satisfies
   // the contract, so this only trips if the serializer produced something

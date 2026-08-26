@@ -24,6 +24,7 @@ import type { BankEntryRow } from "@/lib/rows";
 import { UploadZone } from "@/components/home/upload-zone";
 import { PdfImportBody } from "@/components/home/pdf-import-review-modal";
 import { EditSourceResumeBody } from "@/components/home/edit-source-resume-body";
+import { ImportErrorMessage } from "@/components/home/import-error-message";
 
 interface PreviewEntry {
   key: string;
@@ -64,6 +65,7 @@ export function ImportReviewModal({
   const [file, setFile] = useState<File | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | undefined>(undefined);
   const [mismatchReport, setMismatchReport] = useState<{
     reason: string;
     details: string[];
@@ -90,6 +92,7 @@ export function ImportReviewModal({
     setFile(null);
     setPdfFile(null);
     setErrorMessage(null);
+    setErrorCode(undefined);
     setMismatchReport(null);
     setEntries([]);
     setRemovedIndices(new Set());
@@ -120,6 +123,7 @@ export function ImportReviewModal({
     setFile(selected);
     setPhase("loading");
     setErrorMessage(null);
+    setErrorCode(undefined);
     try {
       const form = new FormData();
       form.set("file", selected);
@@ -127,6 +131,17 @@ export function ImportReviewModal({
       const res = await fetch("/api/imports", { method: "POST", body: form });
       const body = await res.json().catch(() => null);
       if (res.ok && body?.compatible) {
+        // A non-Jake archive that got AI-converted comes back with the
+        // converted zip, so swap it in as the file we'll re-upload on
+        // commit: detectAdapter succeeds there directly and the AI
+        // conversion (and its usage against the cap) never runs twice for
+        // one import.
+        if (typeof body.convertedArchive === "string") {
+          const bytes = Uint8Array.from(atob(body.convertedArchive), (c) =>
+            c.charCodeAt(0),
+          );
+          setFile(new File([bytes], selected.name, { type: selected.type }));
+        }
         const loaded: PreviewEntry[] = (
           body.entries as (Omit<PreviewEntry, "key"> & { index: number })[]
         ).map((entry) => ({ ...entry, key: String(entry.index) }));
@@ -164,6 +179,12 @@ export function ImportReviewModal({
         setPhase("mismatch");
         return;
       }
+      setErrorCode(
+        body?.code === "shared_key_cap_reached" ||
+          body?.code === "byok_key_rejected"
+          ? body.code
+          : undefined,
+      );
       setErrorMessage(
         typeof body?.error === "string"
           ? body.error
@@ -225,6 +246,7 @@ export function ImportReviewModal({
     if (!file) return;
     setPhase("committing");
     setErrorMessage(null);
+    setErrorCode(undefined);
     const overrides = entries
       .map((entry) => {
         const patch: Record<string, unknown> = { index: entry.index };
@@ -264,6 +286,12 @@ export function ImportReviewModal({
         close();
         return;
       }
+      setErrorCode(
+        body?.code === "shared_key_cap_reached" ||
+          body?.code === "byok_key_rejected"
+          ? body.code
+          : undefined,
+      );
       setErrorMessage(
         typeof body?.error === "string"
           ? body.error
@@ -315,12 +343,13 @@ export function ImportReviewModal({
               <div className="flex flex-col gap-2">
                 <UploadZone
                   onFileSelected={handleFileSelected}
-                  onRejected={setErrorMessage}
+                  onRejected={(message) => {
+                    setErrorCode(undefined);
+                    setErrorMessage(message);
+                  }}
                 />
                 {errorMessage && (
-                  <span className="text-[11.5px] text-danger">
-                    {errorMessage}
-                  </span>
+                  <ImportErrorMessage message={errorMessage} code={errorCode} />
                 )}
               </div>
             )}
@@ -410,9 +439,7 @@ export function ImportReviewModal({
                 </div>
 
                 {errorMessage && (
-                  <span className="text-[11.5px] text-danger">
-                    {errorMessage}
-                  </span>
+                  <ImportErrorMessage message={errorMessage} code={errorCode} />
                 )}
 
                 <DialogFooter>

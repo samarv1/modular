@@ -1,9 +1,19 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import JSZip from "jszip";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
 import { ownerScopedTable } from "@/lib/db";
+import { SharedKeyCapExceededError } from "@/lib/ai-usage";
+import { ResumeExtractionAuthError } from "@/lib/resume-extraction";
 
 // Route handlers now resolve ownerId from a real Supabase Auth session
 // (src/lib/owner.ts), which isn't available in this test environment. These
@@ -36,10 +46,33 @@ vi.mock("@/lib/resume-extraction", async () => {
   };
 });
 
+// Wraps the real implementations as spies (rather than replacing them) so
+// existing tests still hit the real ai_usage table by default; individual
+// cap/BYOK tests override the behavior with mockImplementationOnce.
+vi.mock("@/lib/ai-usage", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/ai-usage")>("@/lib/ai-usage");
+  return {
+    ...actual,
+    assertUnderSharedKeyCap: vi.fn(actual.assertUnderSharedKeyCap),
+    recordSharedKeyUsage: vi.fn(actual.recordSharedKeyUsage),
+  };
+});
+
+// Defaults to "no BYOK key configured"; individual BYOK tests override with
+// mockResolvedValueOnce.
+vi.mock("@/lib/byok-store", () => ({
+  hasByokKey: vi.fn().mockResolvedValue(false),
+  getByokKey: vi.fn().mockResolvedValue(null),
+}));
+
 // Import after the mocks above are registered so the route picks them up.
 const { POST } = await import("./route");
 const { uploadArchive } = await import("@/lib/storage");
 const { extractResumeStructure } = await import("@/lib/resume-extraction");
+const { assertUnderSharedKeyCap, recordSharedKeyUsage } =
+  await import("@/lib/ai-usage");
+const { getByokKey, hasByokKey } = await import("@/lib/byok-store");
 
 const fixture = readFileSync(
   join(__dirname, "../../../fixtures/jakes-resume/resume.tex"),
@@ -242,8 +275,20 @@ describe("POST /api/imports — preview mode", () => {
 describe("POST /api/imports — AI fallback for non-Jake zips", () => {
   const sourceResumeIds: string[] = [];
   let templateShellId: string | undefined;
+  // The successful-conversion test below hits the real shared-key cap
+  // counter (assertUnderSharedKeyCap/recordSharedKeyUsage aren't mocked for
+  // it). Pin the clock to a period fabricated for this describe block so it
+  // owns its row outright, rather than racing other test files that also
+  // touch the real current-month row concurrently.
+  const usagePeriod = "2097-04";
+
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${usagePeriod}-15T00:00:00Z`));
+  });
 
   afterAll(async () => {
+    vi.useRealTimers();
     for (const id of sourceResumeIds) {
       await ownerScopedTable("bank_entry", testOwnerId)
         .delete()
@@ -257,6 +302,9 @@ describe("POST /api/imports — AI fallback for non-Jake zips", () => {
         .delete()
         .eq("id", templateShellId);
     }
+    await ownerScopedTable("ai_usage", testOwnerId)
+      .delete()
+      .eq("period", usagePeriod);
   });
 
   it("silently converts a non-Jake zip via AI and commits it like a native upload", async () => {
@@ -424,5 +472,180 @@ describe("POST /api/imports — commit mode with overrides", () => {
     // Only the force-included duplicate landed — everything else was
     // excluded (and would've been deduped away regardless).
     expect(body.entryCount).toBe(1);
+  });
+});
+
+describe("POST /api/imports: shared-key cap and BYOK", () => {
+  function nonJakeZipFile(name: string) {
+    return zipFileOf(
+      "\\documentclass{article}\\begin{document}not jake\\end{document}",
+      name,
+    );
+  }
+
+  it("returns 429 with shared_key_cap_reached when the shared key is at its cap, without calling the model", async () => {
+    vi.mocked(extractResumeStructure).mockClear();
+    vi.mocked(assertUnderSharedKeyCap).mockRejectedValueOnce(
+      new SharedKeyCapExceededError(),
+    );
+    const res = await POST(
+      requestWithFile(await nonJakeZipFile("cap-hit.zip"), {
+        mode: "preview",
+      }),
+    );
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.code).toBe("shared_key_cap_reached");
+    expect(extractResumeStructure).not.toHaveBeenCalled();
+  });
+
+  it("skips the cap check entirely when the caller has a stored BYOK key", async () => {
+    vi.mocked(assertUnderSharedKeyCap).mockClear();
+    vi.mocked(recordSharedKeyUsage).mockClear();
+    vi.mocked(hasByokKey).mockResolvedValueOnce(true);
+    vi.mocked(getByokKey).mockResolvedValueOnce("sk-test-key");
+    vi.mocked(extractResumeStructure).mockResolvedValueOnce({
+      header: { name: "Jane Doe", contactLine: "jane@example.com" },
+      sections: [
+        {
+          title: "Technical Skills",
+          entries: [
+            {
+              kind: "section_chunk",
+              sourceSection: "Technical Skills",
+              items: ["Languages: TypeScript"],
+            },
+          ],
+        },
+      ],
+    });
+    const res = await POST(
+      requestWithFile(await nonJakeZipFile("byok.zip"), {
+        mode: "preview",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(assertUnderSharedKeyCap).not.toHaveBeenCalled();
+    expect(recordSharedKeyUsage).not.toHaveBeenCalled();
+  });
+
+  it("surfaces byok_key_rejected and does not fall back to the shared key", async () => {
+    vi.mocked(assertUnderSharedKeyCap).mockClear();
+    vi.mocked(recordSharedKeyUsage).mockClear();
+    vi.mocked(hasByokKey).mockResolvedValueOnce(true);
+    vi.mocked(getByokKey).mockResolvedValueOnce("sk-bad-key");
+    vi.mocked(extractResumeStructure).mockRejectedValueOnce(
+      new ResumeExtractionAuthError("mock: key rejected"),
+    );
+    const res = await POST(
+      requestWithFile(await nonJakeZipFile("byok-bad-key.zip"), {
+        mode: "preview",
+      }),
+    );
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.code).toBe("byok_key_rejected");
+    expect(assertUnderSharedKeyCap).not.toHaveBeenCalled();
+    expect(recordSharedKeyUsage).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/imports: preview->commit round-trip converts a non-Jake zip only once", () => {
+  const sourceResumeIds: string[] = [];
+  let templateShellId: string | undefined;
+  // The successful conversion below hits the real shared-key cap counter,
+  // so pin the clock to a period fabricated for this describe block: it
+  // doesn't race other test files' real-current-period writes that way.
+  const usagePeriod = "2097-06";
+
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${usagePeriod}-15T00:00:00Z`));
+  });
+
+  afterAll(async () => {
+    vi.useRealTimers();
+    for (const id of sourceResumeIds) {
+      await ownerScopedTable("bank_entry", testOwnerId)
+        .delete()
+        .eq("source_resume_id", id);
+      await ownerScopedTable("source_resume", testOwnerId)
+        .delete()
+        .eq("id", id);
+    }
+    if (templateShellId) {
+      await ownerScopedTable("template_shell", testOwnerId)
+        .delete()
+        .eq("id", templateShellId);
+    }
+    await ownerScopedTable("ai_usage", testOwnerId)
+      .delete()
+      .eq("period", usagePeriod);
+  });
+
+  it("converts once at preview, then commits the converted archive without converting again", async () => {
+    vi.mocked(extractResumeStructure).mockClear();
+    vi.mocked(extractResumeStructure).mockResolvedValueOnce({
+      header: { name: "Jane Doe", contactLine: "jane@example.com" },
+      sections: [
+        {
+          title: "Technical Skills",
+          entries: [
+            {
+              kind: "section_chunk",
+              sourceSection: "Technical Skills",
+              items: ["Languages: TypeScript"],
+            },
+          ],
+        },
+      ],
+    });
+
+    const originalFile = await zipFileOf(
+      "\\documentclass{article}\\begin{document}not jake\\end{document}",
+      "not-jake-roundtrip.zip",
+    );
+
+    const previewRes = await POST(
+      requestWithFile(originalFile, { mode: "preview" }),
+    );
+    expect(previewRes.status).toBe(200);
+    const previewBody = await previewRes.json();
+    expect(previewBody.compatible).toBe(true);
+    expect(typeof previewBody.convertedArchive).toBe("string");
+    expect(extractResumeStructure).toHaveBeenCalledTimes(1);
+
+    // The client re-uploads exactly these bytes, under the original
+    // filename, for the commit request.
+    const convertedBytes = Uint8Array.from(
+      Buffer.from(previewBody.convertedArchive, "base64"),
+    );
+    const convertedFile = new File([convertedBytes], originalFile.name);
+
+    vi.mocked(extractResumeStructure).mockClear();
+    const commitRes = await POST(
+      requestWithFile(convertedFile, { mode: "commit" }),
+    );
+    expect(commitRes.status).toBe(200);
+    const commitBody = await commitRes.json();
+    expect(commitBody.compatible).toBe(true);
+    expect(commitBody.entryCount).toBeGreaterThan(0);
+    // The commit request never had to convert again, since detectAdapter
+    // already recognized the re-uploaded converted archive.
+    expect(extractResumeStructure).not.toHaveBeenCalled();
+    sourceResumeIds.push(commitBody.sourceResumeId);
+    templateShellId = commitBody.templateShellId;
+
+    const { data: sourceResume, error } = await ownerScopedTable(
+      "source_resume",
+      testOwnerId,
+    )
+      .select("display_name")
+      .eq("id", commitBody.sourceResumeId)
+      .single();
+    if (error) throw new Error(error.message);
+    expect(
+      (sourceResume as unknown as { display_name: string }).display_name,
+    ).toBe("not-jake-roundtrip");
   });
 });
