@@ -25,7 +25,7 @@ Tailoring a resume per application usually means duplicating a file and hand-edi
 - **Framework:** Next.js, React, TypeScript
 - **Styling:** Tailwind CSS, shadcn/ui, dnd-kit (drag-and-drop)
 - **Database & auth:** Supabase (Postgres, Google SSO, Storage)
-- **AI extraction:** Google Gemini
+- **AI extraction:** Google Gemini, with per-user monthly usage limits on the shared key and an option to bring your own key for unlimited use
 - **Document processing:** [markitdown](https://github.com/microsoft/markitdown) (PDF to markdown Python function) and Vercel Sandbox + TeX Live (LaTeX compilation)
 
 ## Project structure
