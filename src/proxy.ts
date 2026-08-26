@@ -54,7 +54,10 @@ export const config = {
   // session gate here would 401 it unconditionally. It does no database
   // access; src/lib/pdf-to-markdown.ts authenticates the call with its own
   // shared secret instead (see PDF_TO_MARKDOWN_SECRET).
+  // api/cron/keepalive is excluded for the same reason: Vercel Cron has no
+  // session cookie to carry, and the route authenticates itself with
+  // CRON_SECRET instead.
   matcher: [
-    "/((?!login|auth/callback|api/pdf-to-markdown|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|opengraph-image).*)",
+    "/((?!login|auth/callback|api/pdf-to-markdown|api/cron/keepalive|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|opengraph-image).*)",
   ],
 };
