@@ -21,7 +21,26 @@ export class ArchiveRejectedError extends Error {
 
 const INPUT_INCLUDE_RE = /\\(?:input|include)\s*(?:\{[^}]+\}|[^\s%]+)/;
 
+// JSZip doesn't expose a public way to check an entry's declared
+// uncompressed size before decompressing it, only this undocumented
+// internal field (verified present at runtime across the pinned version).
+// Without this, a small compressed entry that unpacks to something huge
+// (a zip bomb) would fully inflate into memory before MAX_LATEX_SOURCE_CHARS
+// ever gets checked.
+function declaredUncompressedSize(file: JSZip.JSZipObject): number | null {
+  const size = (file as unknown as { _data?: { uncompressedSize?: number } })
+    ._data?.uncompressedSize;
+  return typeof size === "number" ? size : null;
+}
+
 async function readLatexFile(file: JSZip.JSZipObject): Promise<string> {
+  const declaredSize = declaredUncompressedSize(file);
+  if (declaredSize !== null && declaredSize > MAX_LATEX_SOURCE_CHARS) {
+    throw new ArchiveRejectedError(
+      `LaTeX source exceeds the ${MAX_LATEX_SOURCE_CHARS} character limit`,
+      [file.name],
+    );
+  }
   const source = await file.async("string");
   if (source.length > MAX_LATEX_SOURCE_CHARS) {
     throw new ArchiveRejectedError(

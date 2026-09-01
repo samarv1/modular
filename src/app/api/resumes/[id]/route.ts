@@ -3,7 +3,12 @@ import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
 import { loadResumeComposition } from "@/lib/resume-composition-query";
 import { dedupedName } from "@/lib/unique-db-name";
-import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
+import {
+  mutationErrorMessage,
+  mutationErrorStatus,
+  readJsonObject,
+  throwDbError,
+} from "@/lib/api-request";
 import {
   integerFieldError,
   nullableStringFieldError,
@@ -85,8 +90,7 @@ export async function PATCH(
       .select("id")
       .eq("id", body.folderId)
       .maybeSingle();
-    if (folderError)
-      throw new Error((folderError as { message: string }).message);
+    if (folderError) throwDbError(folderError as { message: string });
     if (!folder) {
       return NextResponse.json({ error: "folder not found" }, { status: 422 });
     }
@@ -108,7 +112,7 @@ export async function PATCH(
 
   if (error) {
     return NextResponse.json(
-      { error: error.message },
+      { error: mutationErrorMessage(error) },
       { status: mutationErrorStatus(error) },
     );
   }

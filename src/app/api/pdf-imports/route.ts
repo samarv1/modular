@@ -14,8 +14,8 @@ import { synthesizeJakeArchive } from "@/lib/synthesize-jake-archive";
 import { ArchiveRejectedError } from "@/lib/latex-archive";
 import { commitImport, flattenEntries } from "@/lib/import-commit";
 import {
-  assertUnderSharedKeyCap,
-  recordSharedKeyUsage,
+  reserveSharedKeyUsage,
+  releaseSharedKeyUsage,
   SharedKeyCapExceededError,
 } from "@/lib/ai-usage";
 import { getByokKey, hasByokKey } from "@/lib/byok-store";
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
 
     if (!byok) {
       try {
-        await assertUnderSharedKeyCap(ownerId);
+        await reserveSharedKeyUsage(ownerId);
       } catch (err) {
         if (err instanceof SharedKeyCapExceededError) {
           return NextResponse.json(
@@ -94,6 +94,7 @@ export async function POST(request: Request) {
     try {
       extraction = await extractResumeStructure(markdown, byok);
     } catch (err) {
+      if (!byok) await releaseSharedKeyUsage(ownerId);
       if (err instanceof ResumeExtractionAuthError) {
         return NextResponse.json(
           { error: err.message, code: "byok_key_rejected" },
@@ -105,7 +106,6 @@ export async function POST(request: Request) {
       }
       throw err;
     }
-    if (!byok) await recordSharedKeyUsage(ownerId);
 
     return NextResponse.json({
       extraction,

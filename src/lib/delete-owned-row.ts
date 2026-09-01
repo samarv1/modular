@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
-import { mutationErrorStatus } from "@/lib/api-request";
+import { mutationErrorMessage, mutationErrorStatus } from "@/lib/api-request";
 
 /**
  * Deletes a single owner-scoped row by id and turns the result into the
@@ -9,7 +9,8 @@ import { mutationErrorStatus } from "@/lib/api-request";
  * success, 404 if nothing matched, or the mapped status from
  * mutationErrorStatus on a DB error. `describeError` can override the
  * message for a given status (e.g. a friendlier message for an FK-restricted
- * delete); it falls back to the raw DB error message.
+ * delete); it falls back to mutationErrorMessage's sanitized DB error
+ * message.
  */
 export async function deleteOwnedRow(
   table: string,
@@ -25,12 +26,9 @@ export async function deleteOwnedRow(
     .maybeSingle();
   if (error) {
     const status = mutationErrorStatus(error);
+    const message = mutationErrorMessage(error);
     return NextResponse.json(
-      {
-        error: describeError
-          ? describeError(status, error.message)
-          : error.message,
-      },
+      { error: describeError ? describeError(status, message) : message },
       { status },
     );
   }

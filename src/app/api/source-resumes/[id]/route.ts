@@ -1,6 +1,7 @@
 import { asRows, ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
 import { deleteOwnedRow } from "@/lib/delete-owned-row";
+import { throwDbError } from "@/lib/api-request";
 
 // bank_entry.source_resume_id and resume.source_resume_id are both ON
 // DELETE SET NULL (0001_init.sql) — deleting an upload orphans its entries
@@ -23,7 +24,7 @@ export async function DELETE(
       "bank_entry_id",
     ),
   );
-  if (usedError) throw new Error(usedError.message);
+  if (usedError) throwDbError(usedError);
   const usedIds = new Set((usedEntries ?? []).map((e) => e.bank_entry_id));
 
   const { data: candidateEntries, error: candidateError } = asRows<{
@@ -33,7 +34,7 @@ export async function DELETE(
       .select("id")
       .eq("source_resume_id", id),
   );
-  if (candidateError) throw new Error(candidateError.message);
+  if (candidateError) throwDbError(candidateError);
   const unusedIds = (candidateEntries ?? [])
     .map((e) => e.id)
     .filter((entryId) => !usedIds.has(entryId));
@@ -45,7 +46,7 @@ export async function DELETE(
     )
       .delete()
       .in("id", unusedIds);
-    if (deleteEntriesError) throw new Error(deleteEntriesError.message);
+    if (deleteEntriesError) throwDbError(deleteEntriesError);
   }
 
   return deleteOwnedRow("source_resume", id, "source resume not found");

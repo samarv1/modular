@@ -13,27 +13,28 @@ function currentPeriod(): string {
   return new Date().toISOString().slice(0, 7); // UTC 'YYYY-MM'
 }
 
-export async function assertUnderSharedKeyCap(ownerId: string): Promise<void> {
+// Reserves a slot against the monthly cap atomically (increment-and-check
+// in one statement), so concurrent callers can't all read the same
+// under-cap count and collectively burst past it. Call this before the AI
+// call it guards, and releaseSharedKeyUsage if that call ends up failing.
+export async function reserveSharedKeyUsage(ownerId: string): Promise<void> {
   const client = createServiceClient();
-  const { data, error } = await client
-    .from("ai_usage")
-    .select("count")
-    .eq("owner_id", ownerId)
-    .eq("period", currentPeriod())
-    .maybeSingle();
+  const { data, error } = await client.rpc("try_reserve_ai_usage", {
+    p_owner_id: ownerId,
+    p_period: currentPeriod(),
+    p_cap: SHARED_KEY_MONTHLY_CAP,
+  });
   if (error) throw new Error(error.message);
-  const count = (data as { count: number } | null)?.count ?? 0;
-  if (count >= SHARED_KEY_MONTHLY_CAP) {
-    throw new SharedKeyCapExceededError();
-  }
+  if (!data) throw new SharedKeyCapExceededError();
 }
 
-export async function recordSharedKeyUsage(ownerId: string): Promise<void> {
+export async function releaseSharedKeyUsage(ownerId: string): Promise<void> {
   const client = createServiceClient();
-  const { error } = await client.rpc("increment_ai_usage", {
+  const { error } = await client.rpc("release_ai_usage", {
     p_owner_id: ownerId,
     p_period: currentPeriod(),
   });
-  // A lost usage-count write shouldn't fail an otherwise-successful import.
-  if (error) console.error("recordSharedKeyUsage failed:", error.message);
+  // A lost release just leaves the user a slot short for the month; not
+  // worth failing an already-failed import over.
+  if (error) console.error("releaseSharedKeyUsage failed:", error.message);
 }

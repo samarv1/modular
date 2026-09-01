@@ -43,7 +43,12 @@ export async function compileLatexInSandbox(
     for (let pass = 0; pass < 2; pass++) {
       result = await sandbox.runCommand(
         "pdflatex",
-        ["-interaction=nonstopmode", "-halt-on-error", SOURCE_FILENAME],
+        [
+          "-interaction=nonstopmode",
+          "-halt-on-error",
+          "-no-shell-escape",
+          SOURCE_FILENAME,
+        ],
         { timeoutMs: PASS_TIMEOUT_MS },
       );
     }

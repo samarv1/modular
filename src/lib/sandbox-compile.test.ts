@@ -73,7 +73,8 @@ describe("compileLatexInSandbox", () => {
         { timeoutMs: number },
       ];
       expect(command).toBe("pdflatex");
-      expect(args.some((a) => a.includes("shell-escape"))).toBe(false);
+      expect(args).toContain("-no-shell-escape");
+      expect(args).not.toContain("-shell-escape");
       expect(args).toContain("-halt-on-error");
       expect(options.timeoutMs).toBeGreaterThan(0);
     }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
 import { dedupedName } from "@/lib/unique-db-name";
-import { readJsonObject } from "@/lib/api-request";
+import { readJsonObject, throwDbError } from "@/lib/api-request";
 import { integerFieldError } from "@/lib/field-validation";
 import type { ResumeFolderRow } from "@/lib/rows";
 
@@ -11,7 +11,7 @@ export async function GET() {
   const { data, error } = await ownerScopedTable("resume_folder", ownerId)
     .select("id, name, position_x, position_y, created_at")
     .order("created_at", { ascending: true });
-  if (error) throw new Error((error as { message: string }).message);
+  if (error) throwDbError(error as { message: string });
   return NextResponse.json({
     folders: (data ?? []) as unknown as ResumeFolderRow[],
   });
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
     .insert({ name, position_x: positionX, position_y: positionY })
     .select("id, name, position_x, position_y, created_at")
     .single();
-  if (error) throw new Error((error as { message: string }).message);
+  if (error) throwDbError(error as { message: string });
   return NextResponse.json(
     { folder: data as unknown as ResumeFolderRow },
     { status: 201 },

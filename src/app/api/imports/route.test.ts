@@ -54,8 +54,8 @@ vi.mock("@/lib/ai-usage", async () => {
     await vi.importActual<typeof import("@/lib/ai-usage")>("@/lib/ai-usage");
   return {
     ...actual,
-    assertUnderSharedKeyCap: vi.fn(actual.assertUnderSharedKeyCap),
-    recordSharedKeyUsage: vi.fn(actual.recordSharedKeyUsage),
+    reserveSharedKeyUsage: vi.fn(actual.reserveSharedKeyUsage),
+    releaseSharedKeyUsage: vi.fn(actual.releaseSharedKeyUsage),
   };
 });
 
@@ -70,7 +70,7 @@ vi.mock("@/lib/byok-store", () => ({
 const { POST } = await import("./route");
 const { uploadArchive } = await import("@/lib/storage");
 const { extractResumeStructure } = await import("@/lib/resume-extraction");
-const { assertUnderSharedKeyCap, recordSharedKeyUsage } =
+const { reserveSharedKeyUsage, releaseSharedKeyUsage } =
   await import("@/lib/ai-usage");
 const { getByokKey, hasByokKey } = await import("@/lib/byok-store");
 
@@ -276,7 +276,7 @@ describe("POST /api/imports — AI fallback for non-Jake zips", () => {
   const sourceResumeIds: string[] = [];
   let templateShellId: string | undefined;
   // The successful-conversion test below hits the real shared-key cap
-  // counter (assertUnderSharedKeyCap/recordSharedKeyUsage aren't mocked for
+  // counter (reserveSharedKeyUsage/releaseSharedKeyUsage aren't mocked for
   // it). Pin the clock to a period fabricated for this describe block so it
   // owns its row outright, rather than racing other test files that also
   // touch the real current-month row concurrently.
@@ -485,7 +485,7 @@ describe("POST /api/imports: shared-key cap and BYOK", () => {
 
   it("returns 429 with shared_key_cap_reached when the shared key is at its cap, without calling the model", async () => {
     vi.mocked(extractResumeStructure).mockClear();
-    vi.mocked(assertUnderSharedKeyCap).mockRejectedValueOnce(
+    vi.mocked(reserveSharedKeyUsage).mockRejectedValueOnce(
       new SharedKeyCapExceededError(),
     );
     const res = await POST(
@@ -500,8 +500,8 @@ describe("POST /api/imports: shared-key cap and BYOK", () => {
   });
 
   it("skips the cap check entirely when the caller has a stored BYOK key", async () => {
-    vi.mocked(assertUnderSharedKeyCap).mockClear();
-    vi.mocked(recordSharedKeyUsage).mockClear();
+    vi.mocked(reserveSharedKeyUsage).mockClear();
+    vi.mocked(releaseSharedKeyUsage).mockClear();
     vi.mocked(hasByokKey).mockResolvedValueOnce(true);
     vi.mocked(getByokKey).mockResolvedValueOnce("sk-test-key");
     vi.mocked(extractResumeStructure).mockResolvedValueOnce({
@@ -525,13 +525,13 @@ describe("POST /api/imports: shared-key cap and BYOK", () => {
       }),
     );
     expect(res.status).toBe(200);
-    expect(assertUnderSharedKeyCap).not.toHaveBeenCalled();
-    expect(recordSharedKeyUsage).not.toHaveBeenCalled();
+    expect(reserveSharedKeyUsage).not.toHaveBeenCalled();
+    expect(releaseSharedKeyUsage).not.toHaveBeenCalled();
   });
 
   it("surfaces byok_key_rejected and does not fall back to the shared key", async () => {
-    vi.mocked(assertUnderSharedKeyCap).mockClear();
-    vi.mocked(recordSharedKeyUsage).mockClear();
+    vi.mocked(reserveSharedKeyUsage).mockClear();
+    vi.mocked(releaseSharedKeyUsage).mockClear();
     vi.mocked(hasByokKey).mockResolvedValueOnce(true);
     vi.mocked(getByokKey).mockResolvedValueOnce("sk-bad-key");
     vi.mocked(extractResumeStructure).mockRejectedValueOnce(
@@ -545,8 +545,8 @@ describe("POST /api/imports: shared-key cap and BYOK", () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.code).toBe("byok_key_rejected");
-    expect(assertUnderSharedKeyCap).not.toHaveBeenCalled();
-    expect(recordSharedKeyUsage).not.toHaveBeenCalled();
+    expect(reserveSharedKeyUsage).not.toHaveBeenCalled();
+    expect(releaseSharedKeyUsage).not.toHaveBeenCalled();
   });
 });
 

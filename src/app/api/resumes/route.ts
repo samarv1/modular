@@ -7,7 +7,7 @@ import {
   setResumeComposition,
 } from "@/lib/composition";
 import { dedupedName } from "@/lib/unique-db-name";
-import { readJsonObject } from "@/lib/api-request";
+import { readJsonObject, throwDbError } from "@/lib/api-request";
 import {
   integerFieldError,
   nullableStringFieldError,
@@ -25,7 +25,7 @@ async function ownerHasFolder(
       .eq("id", folderId)
       .maybeSingle(),
   );
-  if (error) throw new Error(error.message);
+  if (error) throwDbError(error);
   return data !== null;
 }
 
@@ -40,7 +40,7 @@ export async function GET() {
       )
       .order("created_at", { ascending: true }),
   );
-  if (error) throw new Error(error.message);
+  if (error) throwDbError(error);
   return NextResponse.json({ resumes: data ?? [] });
 }
 
@@ -137,7 +137,7 @@ async function createBlankResume(
       .limit(1)
       .maybeSingle(),
   );
-  if (sourceResumeError) throw new Error(sourceResumeError.message);
+  if (sourceResumeError) throwDbError(sourceResumeError);
   if (!sourceResume) {
     return NextResponse.json(
       { error: "no bank resume available — import a resume first" },
@@ -153,7 +153,7 @@ async function createBlankResume(
         .eq("id", shellId)
         .maybeSingle(),
     );
-    if (shellError) throw new Error(shellError.message);
+    if (shellError) throwDbError(shellError);
     if (!shell) {
       return NextResponse.json(
         { error: "template shell not found" },
@@ -168,7 +168,7 @@ async function createBlankResume(
         .limit(1)
         .maybeSingle(),
     );
-    if (shellError) throw new Error(shellError.message);
+    if (shellError) throwDbError(shellError);
     if (!shell) {
       return NextResponse.json(
         { error: "no template shell available yet — import a resume first" },
@@ -198,7 +198,7 @@ async function createBlankResume(
       )
       .single(),
   );
-  if (error) throw new Error(error.message);
+  if (error) throwDbError(error);
   return NextResponse.json({ resume: data }, { status: 201 });
 }
 
@@ -225,7 +225,7 @@ async function duplicateResume(
       .eq("id", sourceResumeId)
       .maybeSingle(),
   );
-  if (sourceError) throw new Error(sourceError.message);
+  if (sourceError) throwDbError(sourceError);
   if (!source) {
     return NextResponse.json(
       { error: "resume to duplicate not found" },
@@ -243,7 +243,7 @@ async function duplicateResume(
       .eq("resume_id", sourceResumeId)
       .order("position", { ascending: true }),
   );
-  if (sectionsError) throw new Error(sectionsError.message);
+  if (sectionsError) throwDbError(sectionsError);
 
   const { data: sectionEntries, error: entriesError } = asRows<{
     resume_section_id: string;
@@ -255,7 +255,7 @@ async function duplicateResume(
       .eq("resume_id", sourceResumeId)
       .order("position", { ascending: true }),
   );
-  if (entriesError) throw new Error(entriesError.message);
+  if (entriesError) throwDbError(entriesError);
 
   const { data: newResume, error: createError } = asRow<ResumeRow>(
     await ownerScopedTable("resume", ownerId)
@@ -277,7 +277,7 @@ async function duplicateResume(
       )
       .single(),
   );
-  if (createError) throw new Error(createError.message);
+  if (createError) throwDbError(createError);
 
   const compositionSections = (sections ?? []).map((section) => ({
     title: section.title,

@@ -42,8 +42,8 @@ vi.mock("@/lib/ai-usage", async () => {
     await vi.importActual<typeof import("@/lib/ai-usage")>("@/lib/ai-usage");
   return {
     ...actual,
-    assertUnderSharedKeyCap: vi.fn(actual.assertUnderSharedKeyCap),
-    recordSharedKeyUsage: vi.fn(actual.recordSharedKeyUsage),
+    reserveSharedKeyUsage: vi.fn(actual.reserveSharedKeyUsage),
+    releaseSharedKeyUsage: vi.fn(actual.releaseSharedKeyUsage),
   };
 });
 
@@ -56,7 +56,7 @@ vi.mock("@/lib/byok-store", () => ({
 
 const { POST } = await import("./route");
 const { extractResumeStructure } = await import("@/lib/resume-extraction");
-const { assertUnderSharedKeyCap, recordSharedKeyUsage } =
+const { reserveSharedKeyUsage, releaseSharedKeyUsage } =
   await import("@/lib/ai-usage");
 const { getByokKey, hasByokKey } = await import("@/lib/byok-store");
 
@@ -88,16 +88,18 @@ describe("POST /api/pdf-imports (preview): shared-key cap and BYOK", () => {
       .eq("period", usagePeriod);
   });
 
-  it("increments the shared-key counter on a successful shared-key extraction", async () => {
-    vi.mocked(recordSharedKeyUsage).mockClear();
+  it("reserves the shared-key counter on a successful shared-key extraction and doesn't release it", async () => {
+    vi.mocked(reserveSharedKeyUsage).mockClear();
+    vi.mocked(releaseSharedKeyUsage).mockClear();
     const res = await POST(previewRequest());
     expect(res.status).toBe(200);
-    expect(recordSharedKeyUsage).toHaveBeenCalledWith(testOwnerId);
+    expect(reserveSharedKeyUsage).toHaveBeenCalledWith(testOwnerId);
+    expect(releaseSharedKeyUsage).not.toHaveBeenCalled();
   });
 
   it("returns 429 with shared_key_cap_reached when the shared key is at its cap", async () => {
     vi.mocked(extractResumeStructure).mockClear();
-    vi.mocked(assertUnderSharedKeyCap).mockRejectedValueOnce(
+    vi.mocked(reserveSharedKeyUsage).mockRejectedValueOnce(
       new SharedKeyCapExceededError(),
     );
     const res = await POST(previewRequest());
@@ -108,19 +110,19 @@ describe("POST /api/pdf-imports (preview): shared-key cap and BYOK", () => {
   });
 
   it("skips the cap check entirely when the caller has a stored BYOK key", async () => {
-    vi.mocked(assertUnderSharedKeyCap).mockClear();
-    vi.mocked(recordSharedKeyUsage).mockClear();
+    vi.mocked(reserveSharedKeyUsage).mockClear();
+    vi.mocked(releaseSharedKeyUsage).mockClear();
     vi.mocked(hasByokKey).mockResolvedValueOnce(true);
     vi.mocked(getByokKey).mockResolvedValueOnce("sk-test-key");
     const res = await POST(previewRequest());
     expect(res.status).toBe(200);
-    expect(assertUnderSharedKeyCap).not.toHaveBeenCalled();
-    expect(recordSharedKeyUsage).not.toHaveBeenCalled();
+    expect(reserveSharedKeyUsage).not.toHaveBeenCalled();
+    expect(releaseSharedKeyUsage).not.toHaveBeenCalled();
   });
 
   it("surfaces byok_key_rejected and does not fall back to the shared key", async () => {
-    vi.mocked(assertUnderSharedKeyCap).mockClear();
-    vi.mocked(recordSharedKeyUsage).mockClear();
+    vi.mocked(reserveSharedKeyUsage).mockClear();
+    vi.mocked(releaseSharedKeyUsage).mockClear();
     vi.mocked(hasByokKey).mockResolvedValueOnce(true);
     vi.mocked(getByokKey).mockResolvedValueOnce("sk-bad-key");
     vi.mocked(extractResumeStructure).mockRejectedValueOnce(
@@ -130,7 +132,7 @@ describe("POST /api/pdf-imports (preview): shared-key cap and BYOK", () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.code).toBe("byok_key_rejected");
-    expect(assertUnderSharedKeyCap).not.toHaveBeenCalled();
-    expect(recordSharedKeyUsage).not.toHaveBeenCalled();
+    expect(reserveSharedKeyUsage).not.toHaveBeenCalled();
+    expect(releaseSharedKeyUsage).not.toHaveBeenCalled();
   });
 });

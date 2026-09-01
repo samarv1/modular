@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { asRows, ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
+import { throwDbError } from "@/lib/api-request";
 import type { SourceResumeRow } from "@/lib/rows";
 
 // Backs the home page's "Bank" static page (Desktop) — a plain list of what
@@ -15,6 +16,6 @@ export async function GET() {
       .eq("import_status", "success")
       .order("created_at", { ascending: true }),
   );
-  if (error) throw new Error(error.message);
+  if (error) throwDbError(error);
   return NextResponse.json({ sourceResumes: data ?? [] });
 }

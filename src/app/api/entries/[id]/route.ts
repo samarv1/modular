@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
-import { mutationErrorStatus, readJsonObject } from "@/lib/api-request";
+import {
+  mutationErrorMessage,
+  mutationErrorStatus,
+  readJsonObject,
+} from "@/lib/api-request";
 import { deleteOwnedRow } from "@/lib/delete-owned-row";
 import { renderEntry, renderHeader } from "@/lib/synthesize-jake-latex";
 import {
@@ -82,7 +86,7 @@ export async function PATCH(
 
   if (error) {
     return NextResponse.json(
-      { error: error.message },
+      { error: mutationErrorMessage(error) },
       { status: mutationErrorStatus(error) },
     );
   }

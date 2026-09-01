@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { asRows, ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
+import { throwDbError } from "@/lib/api-request";
 import type { BankEntryRow } from "@/lib/rows";
 
 // ?sourceResumeId= scopes to one upload's entries — used by the import
@@ -25,7 +26,7 @@ export async function GET(request: Request) {
       // not alphabetical.
       .order("created_at", { ascending: true }),
   );
-  if (error) throw new Error(error.message);
+  if (error) throwDbError(error);
 
   return NextResponse.json({ entries: data ?? [] });
 }

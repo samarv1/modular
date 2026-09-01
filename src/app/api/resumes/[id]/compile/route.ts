@@ -7,15 +7,18 @@ import { loadCompileComposition } from "@/lib/compile-composition-query";
 import { compileLatexInSandbox } from "@/lib/sandbox-compile";
 import { getSignedUrl, uploadArchive } from "@/lib/storage";
 import { resumeDownloadFilename } from "@/lib/resume-filename";
-import { isUuid } from "@/lib/api-request";
+import { isUuid, throwDbError } from "@/lib/api-request";
 
-// Synchronous compile: awaits the whole Sandbox round trip and returns the
-// final status in this response (Vercel Functions default to a 300s timeout,
-// plenty for a one-page LaTeX compile) — no separate worker/queue needed.
-// Every write after the sandbox call is guarded by
-// .eq("last_compile_request_id", requestId) so a newer compile that started
-// meanwhile silently wins (PLAN.md's latest-request-wins rule) instead of
-// this one clobbering it.
+// Synchronous compile: awaits the whole Sandbox round trip (up to ~150s,
+// see PASS_TIMEOUT_MS in sandbox-compile.ts) and returns the final status in
+// this response — no separate worker/queue needed. maxDuration is set
+// explicitly below rather than relying on the platform default, which
+// varies by plan and isn't guaranteed to cover a full compile. Every write
+// after the sandbox call is guarded by .eq("last_compile_request_id",
+// requestId) so a newer compile that started meanwhile silently wins
+// (PLAN.md's latest-request-wins rule) instead of this one clobbering it.
+export const maxDuration = 180;
+
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -53,7 +56,7 @@ export async function POST(
       compile_error: null,
     })
     .eq("id", id);
-  if (startError) throw new Error(startError.message);
+  if (startError) throwDbError(startError);
 
   let result;
   try {
@@ -105,7 +108,7 @@ export async function POST(
     })
     .eq("id", id)
     .eq("last_compile_request_id", requestId);
-  if (finishError) throw new Error(finishError.message);
+  if (finishError) throwDbError(finishError);
 
   // Two signed URLs, not one: the preview iframe needs an inline
   // (non-attachment) response, while the download button needs

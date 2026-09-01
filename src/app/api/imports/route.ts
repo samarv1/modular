@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
 import { getOwnerId } from "@/lib/owner";
+import { throwDbError } from "@/lib/api-request";
 import { detectAdapter } from "@/lib/adapters/registry";
 import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
@@ -19,8 +20,8 @@ import {
   parseOverrides,
 } from "@/lib/import-commit";
 import {
-  assertUnderSharedKeyCap,
-  recordSharedKeyUsage,
+  reserveSharedKeyUsage,
+  releaseSharedKeyUsage,
   SharedKeyCapExceededError,
 } from "@/lib/ai-usage";
 import { getByokKey, hasByokKey } from "@/lib/byok-store";
@@ -134,7 +135,7 @@ export async function POST(request: Request) {
     // flags are informational only (dedup itself still runs at commit time).
     const { data: existingLatex, error: existingLatexError } =
       await ownerScopedTable("bank_entry", ownerId).select("raw_latex");
-    if (existingLatexError) throw new Error(existingLatexError.message);
+    if (existingLatexError) throwDbError(existingLatexError);
     const existingNormalized = new Set(
       ((existingLatex ?? []) as unknown as { raw_latex: string }[]).map((row) =>
         normalizeLatex(row.raw_latex),
@@ -201,16 +202,16 @@ async function tryConvertViaAi(latexSource: string, ownerId: string) {
   const byok: ByokConfig | undefined = (await hasByokKey(ownerId))
     ? { apiKey: (await getByokKey(ownerId))! }
     : undefined;
-  if (!byok) await assertUnderSharedKeyCap(ownerId);
+  if (!byok) await reserveSharedKeyUsage(ownerId);
 
   let extraction;
   try {
     extraction = await extractResumeStructure(latexSource, byok);
   } catch (err) {
+    if (!byok) await releaseSharedKeyUsage(ownerId);
     if (err instanceof ResumeExtractionError) return null;
     throw err;
   }
-  if (!byok) await recordSharedKeyUsage(ownerId);
 
   // Backstop, not expected to fail: the canonical preamble always satisfies
   // the contract, so this only trips if the serializer produced something

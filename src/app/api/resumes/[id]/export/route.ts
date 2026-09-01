@@ -7,7 +7,7 @@ import { loadCompileComposition } from "@/lib/compile-composition-query";
 import { buildExportArchive } from "@/lib/latex-export";
 import { downloadArchive, getSignedUrl, uploadArchive } from "@/lib/storage";
 import { resumeDownloadFilename } from "@/lib/resume-filename";
-import { isUuid } from "@/lib/api-request";
+import { isUuid, throwDbError } from "@/lib/api-request";
 
 // LaTeX ZIP export (PLAN.md Phase 8). PDF download already exists as a side
 // effect of compile (see compile/route.ts) — this only produces the source
@@ -33,7 +33,7 @@ export async function GET(
       .eq("id", id)
       .maybeSingle(),
   );
-  if (resumeError) throw new Error(resumeError.message);
+  if (resumeError) throwDbError(resumeError);
   if (!resumeRow) {
     return NextResponse.json({ error: "resume not found" }, { status: 404 });
   }
@@ -53,7 +53,7 @@ export async function GET(
       .eq("id", resumeRow.template_shell_id)
       .maybeSingle(),
   );
-  if (shellError) throw new Error(shellError.message);
+  if (shellError) throwDbError(shellError);
   if (!shellRow) {
     return NextResponse.json(
       { error: "template shell not found" },
@@ -81,8 +81,7 @@ export async function GET(
   const { error: updateError } = await ownerScopedTable("resume", ownerId)
     .update({ latex_export_path: zipPath })
     .eq("id", id);
-  if (updateError)
-    throw new Error((updateError as { message: string }).message);
+  if (updateError) throwDbError(updateError as { message: string });
 
   const zipDownloadUrl = await getSignedUrl(zipPath, 3600, {
     download: resumeDownloadFilename(loaded.title, "zip"),
