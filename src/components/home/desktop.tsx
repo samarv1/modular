@@ -499,9 +499,9 @@ export function Desktop({
   // Backend orphans the folder's resumes (folder_id -> null) rather than
   // deleting them (0003_folders.sql, ON DELETE SET NULL) — mirror that here
   // so they reappear on the desktop instead of vanishing from local state.
-  // A bank upload orphans its bank_entry rows the same way (source_resume_id
-  // -> null), so deleting one here only removes the upload's own icon, not
-  // any entries already pulled from it.
+  // A bank upload's DELETE removes its bank_entry rows outright (including
+  // any placed in a resume outline), so bankFiles is the only local state
+  // to update for that kind.
   async function performDelete() {
     if (!deleteTarget) return;
     const { kind, id } = deleteTarget;
@@ -847,7 +847,7 @@ export function Desktop({
               {deleteTarget?.kind === "folder"
                 ? "Its contents will move back to the desktop."
                 : deleteTarget?.kind === "bank"
-                  ? "Entries already pulled from it stay in your bank, no longer linked to this upload."
+                  ? "Deletes every entry pulled from this resume too."
                   : "This can't be undone."}
             </AlertDialogDescription>
           </AlertDialogHeader>

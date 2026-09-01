@@ -22,7 +22,12 @@ export function AppHeader() {
         Modular
       </span>
       <div className="flex items-center gap-1">
-        <Button variant="ghost" size="sm" render={<Link href="/settings" />}>
+        <Button
+          variant="ghost"
+          size="sm"
+          nativeButton={false}
+          render={<Link href="/settings" />}
+        >
           Settings
         </Button>
         <Button variant="ghost" size="sm" onClick={signOut}>

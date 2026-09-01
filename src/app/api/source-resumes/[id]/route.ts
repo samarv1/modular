@@ -3,29 +3,19 @@ import { getOwnerId } from "@/lib/owner";
 import { deleteOwnedRow } from "@/lib/delete-owned-row";
 import { throwDbError } from "@/lib/api-request";
 
-// bank_entry.source_resume_id and resume.source_resume_id are both ON
-// DELETE SET NULL (0001_init.sql) — deleting an upload orphans its entries
-// rather than removing them (they stay usable, see PLAN.md). But an orphan
-// nobody placed in a resume yet is just clutter, not a useful survivor, so
-// this clears those out first — entries still in use fall back to the
-// ON DELETE SET NULL orphan path as before (resume_section_entry.bank_entry_id
-// is ON DELETE RESTRICT, so a used entry can't be caught up in this delete).
+// Deleting an upload removes every entry it produced, including ones
+// currently placed in a resume outline (resume_section_entry.bank_entry_id
+// is ON DELETE RESTRICT, so those rows are cleared first) — orphaning them
+// via source_resume's ON DELETE SET NULL instead left "source unavailable"
+// entries stranded in the bank with no way to trace them back. The frontend
+// warns before calling this that in-use entries will disappear from the
+// resume too.
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
   const ownerId = await getOwnerId();
-
-  const { data: usedEntries, error: usedError } = asRows<{
-    bank_entry_id: string;
-  }>(
-    await ownerScopedTable("resume_section_entry", ownerId).select(
-      "bank_entry_id",
-    ),
-  );
-  if (usedError) throwDbError(usedError);
-  const usedIds = new Set((usedEntries ?? []).map((e) => e.bank_entry_id));
 
   const { data: candidateEntries, error: candidateError } = asRows<{
     id: string;
@@ -35,17 +25,23 @@ export async function DELETE(
       .eq("source_resume_id", id),
   );
   if (candidateError) throwDbError(candidateError);
-  const unusedIds = (candidateEntries ?? [])
-    .map((e) => e.id)
-    .filter((entryId) => !usedIds.has(entryId));
+  const entryIds = (candidateEntries ?? []).map((e) => e.id);
 
-  if (unusedIds.length > 0) {
+  if (entryIds.length > 0) {
+    const { error: deleteSectionEntriesError } = await ownerScopedTable(
+      "resume_section_entry",
+      ownerId,
+    )
+      .delete()
+      .in("bank_entry_id", entryIds);
+    if (deleteSectionEntriesError) throwDbError(deleteSectionEntriesError);
+
     const { error: deleteEntriesError } = await ownerScopedTable(
       "bank_entry",
       ownerId,
     )
       .delete()
-      .in("id", unusedIds);
+      .in("id", entryIds);
     if (deleteEntriesError) throwDbError(deleteEntriesError);
   }
 
