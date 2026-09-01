@@ -34,6 +34,7 @@ import { DocumentGlyph } from "@/components/home/resume-icon";
 import { FolderIcon } from "@/components/home/folder-icon";
 import { ResumeIcon } from "@/components/home/resume-icon";
 import { StaticPageIcon } from "@/components/home/static-page-icon";
+import { AboutContent } from "@/components/home/about-content";
 import { IconGlyphButton, IconLabel } from "@/components/home/desktop-icon";
 import { ImportReviewModal } from "@/components/home/import-review-modal";
 import {
@@ -730,7 +731,9 @@ export function Desktop({
               </div>
             ) : openPage ? (
               <div className="absolute inset-0 overflow-auto p-8">
-                {openPage.content ? (
+                {openPage.id === "about" ? (
+                  <AboutContent />
+                ) : openPage.content ? (
                   <div className="whitespace-pre-wrap text-[13px] text-ink">
                     {openPage.content}
                   </div>
