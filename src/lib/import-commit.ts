@@ -284,6 +284,7 @@ export async function commitImport({
       desiredDisplayName,
       {
         excludeNulls: true,
+        ownerId,
       },
     );
 

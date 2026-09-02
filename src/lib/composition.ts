@@ -22,12 +22,16 @@ export class CompositionError extends Error {
   }
 }
 
+// ownerId is optional so the sample-resume seed can compose a resume for a user
+// who isn't the caller (the backfill route seeds every account). Request-scoped
+// callers omit it and get the signed-in user, as before.
 export async function setResumeComposition(
   resumeId: string,
   sections: CompositionSectionInput[],
+  explicitOwnerId?: string,
 ): Promise<void> {
   const client = createServiceClient();
-  const ownerId = await getOwnerId();
+  const ownerId = explicitOwnerId ?? (await getOwnerId());
 
   const { error } = await client.rpc("set_resume_composition", {
     p_resume_id: resumeId,

@@ -74,9 +74,28 @@ const { reserveSharedKeyUsage, releaseSharedKeyUsage } =
   await import("@/lib/ai-usage");
 const { getByokKey, hasByokKey } = await import("@/lib/byok-store");
 
-const fixture = readFileSync(
-  join(__dirname, "../../../fixtures/jakes-resume/resume.tex"),
-  "utf8",
+// Every account is seeded with this exact fixture at first login
+// (src/lib/sample-resume/seed-sample-resume.ts), so uploading it verbatim here
+// would hit commitImport's exact-duplicate filter and import zero entries. These
+// tests need content the owner's bank has genuinely never seen, so each of the
+// nine entries gets a marker in a string unique to it. Anything renamed here
+// must keep at least one entry-distinguishing string per entry.
+const ENTRY_MARKERS = [
+  "Jake Ryan", // header chunk
+  "Southwestern University", // one education entry, two experience entries
+  "Blinn College", // the other education entry
+  "Texas A\\&M University", // the remaining experience entry
+  "Gitlytics", // one project
+  "Simple Paintball", // the other project
+  "\\textbf{Languages}", // the technical skills chunk
+];
+
+const fixture = ENTRY_MARKERS.reduce(
+  (tex, marker) => tex.replaceAll(marker, `${marker} (import test)`),
+  readFileSync(
+    join(__dirname, "../../../fixtures/jakes-resume/resume.tex"),
+    "utf8",
+  ),
 );
 
 function requestWithFile(file: File, fields?: Record<string, string>) {

@@ -48,18 +48,22 @@ export function FolderGlyph({
 }) {
   const classes = FOLDER_COLOR_CLASSES[color];
   return (
-    <div className="relative h-14 w-16">
+    // h-16 matches DocumentGlyph, and the folder art is bottom-anchored inside
+    // it. Both glyphs sit in the same DesktopIconSlot above a label, so a box
+    // that's shorter than the document's pushes its label up and breaks the
+    // row's shared baseline. Keep these two heights equal.
+    <div className="relative h-16 w-16">
       {/* Back tab, part of the same folder shape */}
       <span
-        className={`absolute left-1 top-2 h-3 w-8 rounded-t-[3px] ${isOver ? classes.tabOver : classes.tab}`}
+        className={`absolute left-1 top-4 h-3 w-8 rounded-t-[3px] ${isOver ? classes.tabOver : classes.tab}`}
       />
       {/* Generic stacked-papers peek, sticking out above the front panel — no
           real thumbnails yet (the compile worker that would produce a real
           preview is Phase 7, not built), just a visual cue there's content. */}
       {hasContents && (
         <>
-          <span className="absolute left-0 top-0 h-8 w-11 -rotate-6 rounded-sm border border-line-strong bg-surface shadow-sm" />
-          <span className="absolute right-0 top-0 h-8 w-11 rotate-3 rounded-sm border border-line-strong bg-surface shadow-sm" />
+          <span className="absolute left-0 top-2 h-8 w-11 -rotate-6 rounded-sm border border-line-strong bg-surface shadow-sm" />
+          <span className="absolute right-0 top-2 h-8 w-11 rotate-3 rounded-sm border border-line-strong bg-surface shadow-sm" />
         </>
       )}
       {/* Front panel — opaque, drawn last so it covers the lower half of the

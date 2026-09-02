@@ -20,6 +20,7 @@ const TABLES = [
   "resume_section",
   "resume_section_entry",
   "resume_folder",
+  "sample_resume_seed",
 ];
 
 const dbUrl = process.env.SUPABASE_DB_URL;

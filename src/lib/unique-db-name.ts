@@ -9,14 +9,21 @@ import { dedupeName } from "@/lib/finder-style-name";
  * current name is a no-op, not a self-collision; omit it when inserting.
  * Pass `excludeNulls` for columns that can be null (e.g. an in-progress
  * import's display_name) so those rows don't need to be fetched at all.
+ * Pass `ownerId` when naming a row for someone other than the signed-in user
+ * (the sample-resume backfill seeds every account); request-scoped callers omit
+ * it and get the session's owner.
  */
 export async function dedupedName(
   table: string,
   column: string,
   desired: string,
-  options: { excludeId?: string; excludeNulls?: boolean } = {},
+  options: {
+    excludeId?: string;
+    excludeNulls?: boolean;
+    ownerId?: string;
+  } = {},
 ): Promise<string> {
-  const ownerId = await getOwnerId();
+  const ownerId = options.ownerId ?? (await getOwnerId());
   let query = ownerScopedTable(table, ownerId).select(column);
   if (options.excludeId) query = query.neq("id", options.excludeId);
   if (options.excludeNulls) query = query.not(column, "is", null);

@@ -56,8 +56,10 @@ export const config = {
   // shared secret instead (see PDF_TO_MARKDOWN_SECRET).
   // api/cron/keepalive is excluded for the same reason: Vercel Cron has no
   // session cookie to carry, and the route authenticates itself with
-  // CRON_SECRET instead.
+  // CRON_SECRET instead. api/admin/seed-backfill is excluded on the same
+  // grounds: it's run by hand with curl, acts on every user rather than the
+  // caller, and checks CRON_SECRET itself.
   matcher: [
-    "/((?!login|auth/callback|api/pdf-to-markdown|api/cron/keepalive|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|opengraph-image).*)",
+    "/((?!login|auth/callback|api/pdf-to-markdown|api/cron/keepalive|api/admin/seed-backfill|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|opengraph-image).*)",
   ],
 };
