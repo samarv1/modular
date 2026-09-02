@@ -14,6 +14,14 @@ import type {
 } from "@/lib/resume-extraction-schema";
 import type { BankEntryRow } from "@/lib/rows";
 import { ImportErrorMessage } from "@/components/home/import-error-message";
+import { LoadingStatus } from "@/components/home/loading-status";
+
+const LOADING_STEPS = [
+  "Reading your resume…",
+  "Finding sections…",
+  "Extracting entries…",
+  "Checking dates…",
+];
 
 type Phase = "loading" | "review" | "committing";
 
@@ -147,11 +155,7 @@ export function PdfImportBody({
   }
 
   if (phase === "loading") {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="size-4 animate-spin text-faint" />
-      </div>
-    );
+    return <LoadingStatus steps={LOADING_STEPS} />;
   }
 
   if (!extraction) {
