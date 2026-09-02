@@ -33,6 +33,13 @@ try {
       applied_at timestamptz not null default now()
     )
   `);
+  // No policies, so only the service role (and this script's direct Postgres
+  // connection) can touch the tracker. Without this the table is reachable by
+  // anon/authenticated through the Data API, where a write would make migrate
+  // skip or re-apply a file.
+  await client.query(
+    "alter table modular_schema_migrations enable row level security",
+  );
 
   const { rows: appliedRows } = await client.query(
     "select filename from modular_schema_migrations order by filename",
