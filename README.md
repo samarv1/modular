@@ -4,6 +4,10 @@ Import your existing resumes, and every job, project, and school gets pulled apa
 
 ---
 
+## Demo
+
+https://github.com/user-attachments/assets/aed69836-3580-4d76-8735-cdeba9f8a060
+
 ## The problem
 
 Tailoring a resume per application usually means duplicating a file and hand-editing it, or keeping five slightly-different versions around. Modular treats your resume history as a bank of interchangeable pieces instead of a single linear document, so building a new variant is drag-and-drop, instead of copy-and-paste.
