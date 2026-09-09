@@ -26,6 +26,7 @@
     "@supabase/supabase-js": "^2.110.8",
     "@unified-latex/unified-latex-types": "^1.8.4",
     "@unified-latex/unified-latex-util-parse": "^1.8.4",
+    "@vercel/analytics": "^2.0.1",
     "@vercel/sandbox": "^2.9.0",
     "ai": "^7.0.64",
     "class-variance-authority": "^0.7.1",

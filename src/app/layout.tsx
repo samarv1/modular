@@ -6,6 +6,7 @@ import {
   Martian_Mono,
 } from "next/font/google";
 import { cn } from "@/lib/utils";
+import { Analytics } from "@vercel/analytics/next";
 
 const display = Roboto_Condensed({
   subsets: ["latin"],
@@ -66,7 +67,10 @@ export default function RootLayout({
         mono.variable,
       )}
     >
-      <body className="flex h-dvh flex-col overflow-hidden">{children}</body>
+      <body className="flex h-dvh flex-col overflow-hidden">
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
