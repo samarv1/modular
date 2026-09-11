@@ -7,7 +7,19 @@
 // is the standard fix and is still far short of scheme-full. Prints the resulting snapshot id — add it to .env
 // as TEXLIVE_SNAPSHOT_ID; the compile route refuses to run without it.
 // Re-run this only when the TeX Live version needs bumping.
+import { readFileSync } from "fs";
 import { Sandbox } from "@vercel/sandbox";
+
+function readLocalSnapshotId() {
+  try {
+    const match = readFileSync(".env", "utf8").match(
+      /^TEXLIVE_SNAPSHOT_ID=(\S+)/m,
+    );
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 const INSTALL_PROFILE = `
 selected_scheme scheme-basic
@@ -23,6 +35,8 @@ option_src 0
 `.trim();
 
 async function main() {
+  const previousSnapshotId = readLocalSnapshotId();
+
   console.log("creating sandbox...");
   const sandbox = await Sandbox.create({
     runtime: "node24",
@@ -103,6 +117,28 @@ async function main() {
     const snapshot = await sandbox.snapshot();
     console.log(`\nTEXLIVE_SNAPSHOT_ID=${snapshot.snapshotId}`);
     console.log("Add this to .env.");
+
+    if (previousSnapshotId) {
+      // Production and Preview store this as a Sandbox-type env var, which
+      // Vercel never lets you read back, so the old id here (from .env) is
+      // only a guess at what they currently point to, not a confirmed match.
+      console.log(
+        `\nOnce the app is verified against the new snapshot, update every environment and only then delete the old one (${previousSnapshotId}):\n`,
+      );
+      console.log(
+        `  vercel env add TEXLIVE_SNAPSHOT_ID production --value "${snapshot.snapshotId}" --force --sensitive`,
+      );
+      console.log(
+        `  vercel env add TEXLIVE_SNAPSHOT_ID preview --value "${snapshot.snapshotId}" --force --sensitive`,
+      );
+      console.log(
+        `  vercel env add TEXLIVE_SNAPSHOT_ID development --value "${snapshot.snapshotId}" --force --sensitive`,
+      );
+      console.log(
+        `\n  # only after confirming Production and Preview actually matched ${previousSnapshotId}:`,
+      );
+      console.log(`  vercel sandbox snapshots delete ${previousSnapshotId}`);
+    }
   } finally {
     await sandbox.stop().catch(() => undefined);
   }
