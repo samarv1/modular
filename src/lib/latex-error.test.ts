@@ -58,6 +58,18 @@ describe("summarizeCompileError", () => {
     );
     expect(summary.headline).toBe("TEXLIVE_SNAPSHOT_ID is not set.");
     expect(summary.isEnvironmentIssue).toBe(true);
+    expect(summary.isCapacityIssue).toBe(false);
+  });
+
+  it("treats a 402 from Sandbox creation as a capacity issue, not a generic environment issue", () => {
+    const summary = summarizeCompileError(
+      "Compile environment error: Status code 402 is not ok.",
+    );
+    expect(summary.isEnvironmentIssue).toBe(true);
+    expect(summary.isCapacityIssue).toBe(true);
+    expect(summary.headline).toBe(
+      "We've hit our plan's compiling capacity for now. Please check back soon.",
+    );
   });
 
   it("falls back to a generic message with no recognizable error line", () => {

@@ -139,13 +139,20 @@ export function PreviewPane({
 
       {compileError &&
         (() => {
-          const { headline, isEnvironmentIssue } =
+          const { headline, isEnvironmentIssue, isCapacityIssue } =
             summarizeCompileError(compileError);
           // Environment/infra failures (a missing package on the compile
           // setup, a Sandbox boot error) are our bugs, not the user's —
           // nothing actionable for them, so no detail or log is surfaced at
           // all, just a plain retry prompt. Only genuine LaTeX content
           // errors get the headline + full log.
+          if (isCapacityIssue) {
+            return (
+              <p className="rounded-md border border-line-strong bg-surface p-2 text-[11px] text-muted-fg">
+                {headline}
+              </p>
+            );
+          }
           if (isEnvironmentIssue) {
             return (
               <p className="rounded-md border border-line-strong bg-surface p-2 text-[11px] text-muted-fg">
