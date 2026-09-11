@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import JSZip from "jszip";
 import { parseLatexArchive } from "@/lib/latex-archive";
 import { detectAdapter } from "@/lib/adapters/registry";
-import { flattenEntries } from "@/lib/import-commit";
+import { flattenEntries } from "@/lib/flatten-entries";
 import { assembleJakeResume } from "@/lib/adapters/jakes-resume-v1/assemble";
 import {
   bankEntryToExtractedEntry,

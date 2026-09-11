@@ -12,7 +12,8 @@ import {
 import { ResumeExtractionSchema } from "@/lib/resume-extraction-schema";
 import { synthesizeJakeArchive } from "@/lib/synthesize-jake-archive";
 import { ArchiveRejectedError } from "@/lib/latex-archive";
-import { commitImport, flattenEntries } from "@/lib/import-commit";
+import { commitImport } from "@/lib/import-commit";
+import { flattenEntries } from "@/lib/flatten-entries";
 import {
   reserveSharedKeyUsage,
   releaseSharedKeyUsage,

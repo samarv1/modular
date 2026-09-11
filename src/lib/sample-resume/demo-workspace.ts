@@ -1,5 +1,5 @@
 import { detectAdapter } from "@/lib/adapters/registry";
-import { flattenEntries } from "@/lib/import-commit";
+import { flattenEntries } from "@/lib/flatten-entries";
 import { nextFreePlacement, nextPlacement } from "@/lib/desktop-placement";
 import { STATIC_PAGES } from "@/lib/static-pages";
 import type { BankEntryRow, ResumeRow, SourceResumeRow } from "@/lib/rows";
