@@ -94,6 +94,15 @@ export function getDemoWorkspace(): DemoWorkspace {
     created_at: now,
   };
 
+  // Frozen because this object is shared across every request on the
+  // server instance (memoized above), not rebuilt per visitor. A future
+  // in-place edit on a shared entry would otherwise leak across visitors.
+  entries.forEach((entry) => Object.freeze(entry));
+  Object.freeze(entries);
+  Object.freeze(resume);
+  Object.freeze(editorResume);
+  Object.freeze(sourceResume);
+
   cached = { entries, resume, editorResume, sourceResume };
   return cached;
 }
