@@ -1,7 +1,8 @@
 import { connection } from "next/server";
 import { ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
+import { getOwnerIdOrNull } from "@/lib/owner";
 import { Desktop } from "@/components/home/desktop";
+import { getDemoWorkspace } from "@/lib/sample-resume/demo-workspace";
 import type { ResumeFolderRow, ResumeRow } from "@/lib/rows";
 
 export default async function Home() {
@@ -10,7 +11,27 @@ export default async function Home() {
   // builds prerender the owner's desktop and freeze it at deploy time.
   await connection();
 
-  const ownerId = await getOwnerId();
+  const ownerId = await getOwnerIdOrNull();
+
+  // Anonymous visitor: src/proxy.ts already let this request through with
+  // no session (see its comment) rather than redirecting to /login. Render
+  // the same desktop shape a freshly seeded account gets, one "Jake's
+  // Resume" and no folders, built from the in-memory fixture instead of a
+  // database read.
+  if (ownerId === null) {
+    const { resume, sourceResume } = getDemoWorkspace();
+    return (
+      <main className="flex min-h-0 flex-1 flex-col">
+        <Desktop
+          initialFolders={[]}
+          initialResumes={[resume]}
+          hasTemplateShell
+          demo
+          demoSourceResume={sourceResume}
+        />
+      </main>
+    );
+  }
   const [
     { data: folderData, error: folderError },
     { data: resumeData, error: resumeError },

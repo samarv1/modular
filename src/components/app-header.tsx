@@ -6,7 +6,18 @@ import { Button } from "@/components/ui/button";
 // Top bar for the home/desktop page (its only caller). "Modular" is static
 // text, not a link — navigation back to the desktop elsewhere in the app is
 // the explicit "← Desktop" button (back-to-desktop.tsx), not the wordmark.
-export function AppHeader() {
+//
+// `demo` is the anonymous playground (no session): Settings/Sign out have
+// nothing to act on, so a single sign-in button takes their place instead,
+// opening the same SignInModal every other demo action does (see Desktop,
+// its only caller with demo set).
+export function AppHeader({
+  demo = false,
+  onSignInClick,
+}: {
+  demo?: boolean;
+  onSignInClick?: () => void;
+}) {
   async function signOut() {
     await fetch("/api/auth/signout", { method: "POST" });
     // Full navigation, not router.push()+refresh(): a client-side refresh()
@@ -22,17 +33,25 @@ export function AppHeader() {
         Modular
       </span>
       <div className="flex items-center gap-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          nativeButton={false}
-          render={<Link href="/settings" />}
-        >
-          Settings
-        </Button>
-        <Button variant="ghost" size="sm" onClick={signOut}>
-          Sign out
-        </Button>
+        {demo ? (
+          <Button variant="ghost" size="sm" onClick={onSignInClick}>
+            Sign in
+          </Button>
+        ) : (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              nativeButton={false}
+              render={<Link href="/settings" />}
+            >
+              Settings
+            </Button>
+            <Button variant="ghost" size="sm" onClick={signOut}>
+              Sign out
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );

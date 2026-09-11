@@ -64,6 +64,8 @@ export function BankPane({
   usedEntryIds,
   onEntryPatched,
   onEntriesImported,
+  demo = false,
+  onRequireSignIn,
 }: {
   entries: BankEntryRow[];
   // Entries already placed in the active resume — hidden from the bank
@@ -78,6 +80,13 @@ export function BankPane({
     values: { displayName?: string; tags?: string[]; rawLatex?: string },
   ) => void;
   onEntriesImported?: (entries: BankEntryRow[]) => void;
+  // Anonymous playground: no session, so upload, rename, and field edits
+  // all open the sign-in modal instead of their usual UI. See
+  // ResumeEditor's `demo` prop, its only caller.
+  demo?: boolean;
+  // Opens the sign-in modal ResumeEditor already owns. Called instead of
+  // the normal action wherever demo is true.
+  onRequireSignIn?: () => void;
 }) {
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -112,6 +121,12 @@ export function BankPane({
     id: string,
     values: { displayName?: string; tags?: string[] },
   ) {
+    // Unreachable today: EntryCard's rename trigger already opens the
+    // sign-in modal instead of entering edit mode. Guarded anyway.
+    if (demo) {
+      onRequireSignIn?.();
+      return;
+    }
     const previous = entries.find((entry) => entry.id === id);
     if (!previous) return;
     const version = (patchVersions.current.get(id) ?? 0) + 1;
@@ -154,19 +169,30 @@ export function BankPane({
           <span />
         )}
         <button
-          onClick={() => setImportModalOpen(true)}
+          onClick={() => {
+            if (demo) {
+              onRequireSignIn?.();
+              return;
+            }
+            setImportModalOpen(true);
+          }}
           className="flex shrink-0 items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[10.5px] font-mono uppercase tracking-wide text-muted-fg hover:border-brand hover:text-brand"
         >
           <UploadIcon className="size-3" />
           Upload
         </button>
-        <ImportReviewModal
-          open={importModalOpen}
-          onOpenChange={setImportModalOpen}
-          onImported={(imported) => {
-            onEntriesImported?.(imported);
-          }}
-        />
+        {/* The button above redirects to /login in demo mode instead of
+            setting importModalOpen, so this never opens there. Left
+            unmounted entirely for defense in depth. */}
+        {!demo && (
+          <ImportReviewModal
+            open={importModalOpen}
+            onOpenChange={setImportModalOpen}
+            onImported={(imported) => {
+              onEntriesImported?.(imported);
+            }}
+          />
+        )}
       </div>
       <ScrollArea className="min-h-0 flex-1">
         {/* pr-4, not pr-2 — the scrollbar (base-ui ScrollArea) is an overlay
@@ -192,8 +218,16 @@ export function BankPane({
                   <EntryCard
                     key={entry.id}
                     entry={entry}
+                    demo={demo}
+                    onRequireSignIn={onRequireSignIn}
                     onPatch={patchEntry}
-                    onOpenEdit={() => setEditingEntryId(entry.id)}
+                    onOpenEdit={() => {
+                      if (demo) {
+                        onRequireSignIn?.();
+                        return;
+                      }
+                      setEditingEntryId(entry.id);
+                    }}
                   />
                 ))}
               </div>
@@ -337,6 +371,8 @@ function EntryCard({
   entry,
   onPatch,
   onOpenEdit,
+  demo = false,
+  onRequireSignIn,
 }: {
   entry: BankEntryRow;
   onPatch: (
@@ -344,6 +380,8 @@ function EntryCard({
     values: { displayName?: string; tags?: string[] },
   ) => void;
   onOpenEdit: () => void;
+  demo?: boolean;
+  onRequireSignIn?: () => void;
 }) {
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(entry.display_name);
@@ -439,6 +477,10 @@ function EntryCard({
             <span
               className="pointer-events-auto w-fit text-[12.5px] font-semibold"
               onDoubleClick={() => {
+                if (demo) {
+                  onRequireSignIn?.();
+                  return;
+                }
                 cancelNameRef.current = false;
                 setName(entry.display_name);
                 setEditingName(true);
