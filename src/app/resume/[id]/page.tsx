@@ -1,10 +1,14 @@
 import { notFound } from "next/navigation";
 import { ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
+import { getOwnerId, getOwnerIdOrNull } from "@/lib/owner";
 import { loadResumeComposition } from "@/lib/resume-composition-query";
 import { getSignedUrl } from "@/lib/storage";
 import { resumeDownloadFilename } from "@/lib/resume-filename";
 import { ResumeEditor } from "@/components/resume-editor";
+import {
+  DEMO_RESUME_ID,
+  getDemoWorkspace,
+} from "@/lib/sample-resume/demo-workspace";
 import type { BankEntryRow } from "@/lib/rows";
 
 export default async function ResumePage({
@@ -16,6 +20,26 @@ export default async function ResumePage({
 }) {
   const { id } = await params;
   const { new: isNew } = await searchParams;
+
+  // Anonymous visitor opening the one demo resume: src/proxy.ts let this
+  // through with no session. loadResumeComposition's isUuid guard below
+  // already 404s any other id with no session, but "demo" isn't a UUID
+  // either, so it needs its own branch here that never touches the database.
+  if (id === DEMO_RESUME_ID && (await getOwnerIdOrNull()) === null) {
+    const { entries, editorResume } = getDemoWorkspace();
+    return (
+      <main className="flex min-h-0 flex-1 flex-col">
+        <ResumeEditor
+          demo
+          initialEntries={entries}
+          initialResume={editorResume}
+          initialSections={[]}
+          initialPdfUrl={null}
+          initialPdfDownloadUrl={null}
+        />
+      </main>
+    );
+  }
 
   // loadResumeComposition() returns null only when the resume row itself
   // doesn't exist (owner-scoped, so another owner's resume 404s the same

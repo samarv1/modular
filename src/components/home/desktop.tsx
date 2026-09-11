@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
+import { SignInModal } from "@/components/sign-in-modal";
 import { backToDesktopButtonClass } from "@/components/back-to-desktop";
 import {
   AlertDialog,
@@ -135,10 +136,18 @@ export function Desktop({
   initialFolders,
   initialResumes,
   hasTemplateShell,
+  demo = false,
+  demoSourceResume,
 }: {
   initialFolders: ResumeFolderRow[];
   initialResumes: ResumeRow[];
   hasTemplateShell: boolean;
+  // Anonymous playground: no session, so nothing here can be created,
+  // deleted, uploaded, or opened for editing. Arranging what's already on
+  // the desktop (icon drag) stays local; everything else opens the sign-in
+  // modal. See src/lib/sample-resume/demo-workspace.ts.
+  demo?: boolean;
+  demoSourceResume?: SourceResumeRow;
 }) {
   const router = useRouter();
   const [folders, setFolders] = useState(initialFolders);
@@ -162,6 +171,10 @@ export function Desktop({
   } | null>(null);
   const resumePatchVersions = useRef(new Map<string, number>());
   const folderPatchVersions = useRef(new Map<string, number>());
+  const [signInOpen, setSignInOpen] = useState(false);
+  function requireSignIn() {
+    setSignInOpen(true);
+  }
 
   const showError = useCallback((message: string) => {
     setError(message);
@@ -187,8 +200,13 @@ export function Desktop({
   // already has, so it's fetched client-side — but eagerly (not only once
   // the page is opened), since the closed folder icon also needs to know
   // whether there's anything inside to show the non-empty "peek" glyph.
-  const [bankFiles, setBankFiles] = useState<SourceResumeRow[] | null>(null);
+  const [bankFiles, setBankFiles] = useState<SourceResumeRow[] | null>(
+    demo && demoSourceResume ? [demoSourceResume] : null,
+  );
   const refreshBankFiles = useCallback(() => {
+    // Demo mode never imports anything new, so there's nothing to refresh.
+    // bankFiles was seeded with the fixture's one entry above.
+    if (demo) return;
     fetch("/api/source-resumes")
       .then((res) => {
         if (!res.ok) throw new Error("bank refresh failed");
@@ -196,7 +214,7 @@ export function Desktop({
       })
       .then((body) => setBankFiles(body.sourceResumes ?? []))
       .catch(() => showError("Bank files could not be loaded."));
-  }, [showError]);
+  }, [demo, showError]);
   useEffect(() => {
     refreshBankFiles();
   }, [refreshBankFiles]);
@@ -294,6 +312,9 @@ export function Desktop({
     values: Record<string, unknown>,
     previous: ResumeRow,
   ) {
+    // Demo mode: the caller already applied the optimistic update locally
+    // (see handleDragEnd), so icon dragging works, it just never persists.
+    if (demo) return;
     const version = (resumePatchVersions.current.get(id) ?? 0) + 1;
     resumePatchVersions.current.set(id, version);
     void fetch(`/api/resumes/${id}`, {
@@ -326,6 +347,9 @@ export function Desktop({
     values: Record<string, unknown>,
     previous: ResumeFolderRow,
   ) {
+    // Unreachable today: demo mode never has any folders, matching a fresh
+    // account. Guarded anyway in case a folder ever appears there.
+    if (demo) return;
     const version = (folderPatchVersions.current.get(id) ?? 0) + 1;
     folderPatchVersions.current.set(id, version);
     void fetch(`/api/folders/${id}`, {
@@ -448,6 +472,10 @@ export function Desktop({
   }
 
   async function createFolder() {
+    if (demo) {
+      requireSignIn();
+      return;
+    }
     const pos = nextFreePlacement(occupiedRootPositions());
     try {
       const res = await fetch("/api/folders", {
@@ -465,6 +493,12 @@ export function Desktop({
   }
 
   async function renameFolder(id: string, name: string) {
+    // Unreachable today: demo has no folders, and createFolder already
+    // redirects before one can exist. Guarded anyway.
+    if (demo) {
+      requireSignIn();
+      return;
+    }
     const trimmed = name.trim();
     setRenamingFolderId(null);
     if (!trimmed) return;
@@ -487,6 +521,10 @@ export function Desktop({
 
   function confirmDeleteSelected() {
     if (!selected || selected.kind === "page") return;
+    if (demo) {
+      requireSignIn();
+      return;
+    }
     setDeleteTarget({ kind: selected.kind, id: selected.id });
   }
 
@@ -546,6 +584,10 @@ export function Desktop({
   // inside a folder drops the new resume straight into it, not onto the
   // desktop underneath.
   async function createResume() {
+    if (demo) {
+      requireSignIn();
+      return;
+    }
     if (!templateShellAvailable) {
       const params = new URLSearchParams();
       if (currentFolderId) params.set("folderId", currentFolderId);
@@ -580,7 +622,7 @@ export function Desktop({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <AppHeader />
+      <AppHeader demo={demo} onSignInClick={requireSignIn} />
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-3 py-2">
         {openPage ? (
           <>
@@ -644,6 +686,10 @@ export function Desktop({
               icon={Upload}
               label="Upload"
               onClick={() => {
+                if (demo) {
+                  requireSignIn();
+                  return;
+                }
                 setEditingSourceResume(null);
                 setImportModalOpen(true);
               }}
@@ -655,17 +701,22 @@ export function Desktop({
         )}
       </div>
 
-      <ImportReviewModal
-        open={importModalOpen}
-        onOpenChange={(next) => {
-          setImportModalOpen(next);
-          if (!next) setEditingSourceResume(null);
-        }}
-        editSourceResume={editingSourceResume}
-        onImported={() => {
-          refreshBankFiles();
-        }}
-      />
+      {/* Every opener above redirects to /login in demo mode instead of
+          setting importModalOpen, so this never opens there. Left unmounted
+          entirely for defense in depth. */}
+      {!demo && (
+        <ImportReviewModal
+          open={importModalOpen}
+          onOpenChange={(next) => {
+            setImportModalOpen(next);
+            if (!next) setEditingSourceResume(null);
+          }}
+          editSourceResume={editingSourceResume}
+          onImported={() => {
+            refreshBankFiles();
+          }}
+        />
+      )}
 
       <DndContext
         id="desktop-dnd"
@@ -716,6 +767,10 @@ export function Desktop({
                           setSelected({ kind: "bank", id: file.id })
                         }
                         onOpen={() => {
+                          if (demo) {
+                            requireSignIn();
+                            return;
+                          }
                           setSelected(null);
                           setEditingSourceResume({
                             id: file.id,
@@ -859,6 +914,8 @@ export function Desktop({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {demo && <SignInModal open={signInOpen} onOpenChange={setSignInOpen} />}
     </div>
   );
 }

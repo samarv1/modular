@@ -16,6 +16,7 @@ import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { Pencil } from "lucide-react";
 import { BackToDesktopLink } from "@/components/back-to-desktop";
 import { BankPane, BankEntryCardVisual } from "@/components/bank/bank-pane";
+import { SignInModal } from "@/components/sign-in-modal";
 import {
   OutlinePane,
   type EditorSection,
@@ -32,6 +33,10 @@ import type {
   ResumeMetaRow,
   ResumeSectionRow,
 } from "@/lib/resume-composition-query";
+import {
+  loadDemoComposition,
+  saveDemoComposition,
+} from "@/lib/demo-composition-store";
 
 // Single current-resume title, click-to-rename. Switching between resumes
 // happens on the home page (src/app/page.tsx) — this editor only ever works
@@ -165,6 +170,7 @@ export function ResumeEditor({
   initialPdfUrl = null,
   initialPdfDownloadUrl = null,
   initialRenaming = false,
+  demo = false,
 }: {
   initialEntries: BankEntryRow[];
   initialResume: ResumeMetaRow;
@@ -172,6 +178,10 @@ export function ResumeEditor({
   initialPdfUrl?: string | null;
   initialPdfDownloadUrl?: string | null;
   initialRenaming?: boolean;
+  // Anonymous playground: no session, so nothing here persists. Outline
+  // drag/reorder/remove stays local; rename, compile, and export open the
+  // sign-in modal. See src/lib/sample-resume/demo-workspace.ts.
+  demo?: boolean;
 }) {
   const [entries, setEntries] = useState(initialEntries);
   // Always the resume this route (/resume/[id]) was opened for — switching
@@ -187,6 +197,22 @@ export function ResumeEditor({
   const [pdfDownloadUrl, setPdfDownloadUrl] = useState(initialPdfDownloadUrl);
   const [compiling, setCompiling] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [signInOpen, setSignInOpen] = useState(false);
+  const requireSignIn = () => setSignInOpen(true);
+
+  // Demo mode's outline lives in sessionStorage, not the DB (see
+  // updateSections below), so restore it here rather than in the useState
+  // initializer above: sessionStorage doesn't exist during SSR, and reading
+  // it there would mismatch the server-rendered empty outline.
+  useEffect(() => {
+    if (!demo) return;
+    const stored = loadDemoComposition();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (stored) setSections(stored);
+    // Runs once on mount only. demo is a static prop and this route is
+    // opened fresh for each resume.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // A freshly-created resume (via the home page's "New resume", which
   // navigates here with ?new=1) opens straight into rename mode rather than
   // just appearing with the default "Untitled resume" title — that's the
@@ -271,6 +297,12 @@ export function ResumeEditor({
   }
 
   function queueCompositionSave(next: EditorSection[]) {
+    // Demo mode: persist to sessionStorage instead of the server, so the
+    // outline survives a "← Desktop" and back but never touches /api/*.
+    if (demo) {
+      saveDemoComposition(next);
+      return;
+    }
     const queue = saveQueueRef.current;
     queue.pending = next.map((section) => ({
       ...section,
@@ -285,6 +317,10 @@ export function ResumeEditor({
   }
 
   async function renameResume(title: string) {
+    if (demo) {
+      requireSignIn();
+      return;
+    }
     const trimmed = title.trim();
     if (!trimmed || trimmed === resume.title) return;
     const previousTitle = resume.title;
@@ -310,6 +346,10 @@ export function ResumeEditor({
   // trip), so this just awaits one fetch — no polling loop needed, the
   // response already carries the final status.
   async function compileResume() {
+    if (demo) {
+      requireSignIn();
+      return;
+    }
     setCompiling(true);
     setResume((cur) => ({
       ...cur,
@@ -356,6 +396,13 @@ export function ResumeEditor({
   }
 
   async function exportResume() {
+    // Unreachable today: preview-pane.tsx only renders the Download button
+    // once pdfDownloadUrl is set, which compileResume's own redirect above
+    // never lets happen in demo mode. Guarded anyway.
+    if (demo) {
+      requireSignIn();
+      return;
+    }
     setExporting(true);
     try {
       const res = await fetch(`/api/resumes/${resume.id}/export`);
@@ -606,7 +653,13 @@ export function ResumeEditor({
           key={renaming ? "editing" : "viewing"}
           resume={resume}
           renaming={renaming}
-          onStartRename={() => setRenaming(true)}
+          onStartRename={() => {
+            if (demo) {
+              requireSignIn();
+              return;
+            }
+            setRenaming(true);
+          }}
           onCommitRename={(title) => {
             setRenaming(false);
             void renameResume(title);
@@ -647,6 +700,8 @@ export function ResumeEditor({
             <BankPane
               entries={entries}
               usedEntryIds={usedEntryIds}
+              demo={demo}
+              onRequireSignIn={requireSignIn}
               onEntriesImported={(importedEntries) =>
                 setEntries((cur) => [...importedEntries, ...cur])
               }
@@ -729,6 +784,8 @@ export function ResumeEditor({
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      {demo && <SignInModal open={signInOpen} onOpenChange={setSignInOpen} />}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
   HeaderDataSchema,
 } from "@/lib/resume-extraction-schema";
 import { entryDisplayName } from "@/lib/entry-display-name";
+import type { FlatEntry } from "@/lib/flatten-entries";
 
 // Shared by both import entry points (POST /api/imports for real .zip
 // uploads, POST /api/pdf-imports for synthesized-from-PDF ones): everything
@@ -20,37 +21,6 @@ import { entryDisplayName } from "@/lib/entry-display-name";
 // (trailing spaces, blank lines) without doing any semantic comparison.
 export function normalizeLatex(raw: string): string {
   return raw.trim().replace(/\s+/g, " ");
-}
-
-// Flat, index-stable view of every extracted entry, in the same order
-// section-by-section that the DB insert eventually uses. `mode=preview` and
-// `mode=commit` both derive this from an identical parse/extract of the same
-// file, so an override's `index` addresses the same entry in either call.
-export type FlatEntry = {
-  index: number;
-  kind: string;
-  sourceSection: string;
-  displayName: string;
-  rawLatex: string;
-  sourceOffsetStart: number | null;
-  sourceOffsetEnd: number | null;
-  requiredPackages: string[];
-};
-
-export function flattenEntries(extracted: ExtractedResume): FlatEntry[] {
-  let index = 0;
-  return extracted.sections.flatMap((section) =>
-    section.entries.map((entry) => ({
-      index: index++,
-      kind: entry.kind,
-      sourceSection: section.title,
-      displayName: entry.displayName,
-      rawLatex: entry.rawLatex,
-      sourceOffsetStart: entry.sourceOffsetStart ?? null,
-      sourceOffsetEnd: entry.sourceOffsetEnd ?? null,
-      requiredPackages: entry.requiredPackages,
-    })),
-  );
 }
 
 export type EntryOverride = {

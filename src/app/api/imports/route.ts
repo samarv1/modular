@@ -15,10 +15,10 @@ import { synthesizeJakeArchive } from "@/lib/synthesize-jake-archive";
 import {
   applyOverrides,
   commitImport,
-  flattenEntries,
   normalizeLatex,
   parseOverrides,
 } from "@/lib/import-commit";
+import { flattenEntries } from "@/lib/flatten-entries";
 import {
   reserveSharedKeyUsage,
   releaseSharedKeyUsage,
