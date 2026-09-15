@@ -30,16 +30,12 @@ import {
 } from "@/lib/bank-entry-fields";
 import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
 import { sectionGroupLabel } from "@/lib/section-label";
+import { groupEntriesBySection } from "@/lib/group-by-section";
 import type { ExtractedEntry } from "@/lib/resume-extraction-schema";
 import type { BankEntryRow } from "@/lib/rows";
 import { BANK_DRAG_PREFIX } from "@/components/dnd-ids";
 import { ImportReviewModal } from "@/components/home/import-review-modal";
 
-// The uploaded file's original name (source_resume.display_name), so
-// entries from different uploads read as "Ldgr" / "Dibs" instead of an id
-// fragment. Falls back to a short id for orphaned entries (source_resume_id
-// is ON DELETE SET NULL, see 0001_init.sql) or entries imported before
-// source_resume.display_name existed (0004 migration, backfilled as null).
 const GROUP_PRIORITY = [
   "name & contact",
   "education",
@@ -55,7 +51,7 @@ function groupPriority(label: string) {
 function resumeSourceLabel(entry: BankEntryRow): string {
   if (entry.source_resume?.display_name)
     return entry.source_resume.display_name;
-  if (!entry.source_resume_id) return "source unavailable"; // orphaned entry, see PLAN.md
+  if (!entry.source_resume_id) return "source unavailable";
   return entry.source_resume_id.slice(0, 6);
 }
 
@@ -68,52 +64,30 @@ export function BankPane({
   onRequireSignIn,
 }: {
   entries: BankEntryRow[];
-  // Entries already placed in the active resume — hidden from the bank
-  // entirely (see PLAN.md-adjacent: dragging into the outline pane "moves"
-  // the card, not copies it) until removed via the outline's "X", which
-  // drops the id from here and brings the card back.
   usedEntryIds: Set<string>;
-  // Mirrors a display-name/tags edit up to the parent so the outline pane
-  // and bank pane render from the same canonical entry state.
   onEntryPatched?: (
     id: string,
     values: { displayName?: string; tags?: string[]; rawLatex?: string },
   ) => void;
   onEntriesImported?: (entries: BankEntryRow[]) => void;
-  // Anonymous playground: no session, so upload, rename, and field edits
-  // all open the sign-in modal instead of their usual UI. See
-  // ResumeEditor's `demo` prop, its only caller.
   demo?: boolean;
-  // Opens the sign-in modal ResumeEditor already owns. Called instead of
-  // the normal action wherever demo is true.
   onRequireSignIn?: () => void;
 }) {
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [entryError, setEntryError] = useState<string | null>(null);
   const patchVersions = useRef(new Map<string, number>());
-  // Derived from `entries` (not a captured snapshot) so tag edits made
-  // inside the modal itself show up immediately rather than going stale.
   const editingEntry = entries.find((e) => e.id === editingEntryId) ?? null;
 
-  // Grouped by display section. Within that, group headers follow a fixed
-  // priority — Education, Experience, Leadership, Projects, then Other last
-  // — rather than upload order, so "Other" doesn't end up sitting above a
-  // known section just because its first entry happened to import earlier.
   const groups = useMemo(() => {
-    const order: string[] = [];
-    const byLabel = new Map<string, BankEntryRow[]>();
-    for (const entry of entries) {
-      const label = sectionGroupLabel(entry.source_section);
-      if (!byLabel.has(label)) {
-        order.push(label);
-        byLabel.set(label, []);
-      }
-      if (!usedEntryIds.has(entry.id)) byLabel.get(label)!.push(entry);
-    }
-    return order
-      .map((label): [string, BankEntryRow[]] => [label, byLabel.get(label)!])
-      .filter(([, group]) => group.length > 0)
+    return groupEntriesBySection(
+      entries.filter((entry) => !usedEntryIds.has(entry.id)),
+      (entry) => sectionGroupLabel(entry.source_section),
+    )
+      .map(({ key, entries: groupEntries }): [string, BankEntryRow[]] => [
+        key,
+        groupEntries,
+      ])
       .sort(([a], [b]) => groupPriority(a) - groupPriority(b));
   }, [entries, usedEntryIds]);
 
@@ -121,8 +95,6 @@ export function BankPane({
     id: string,
     values: { displayName?: string; tags?: string[] },
   ) {
-    // Unreachable today: EntryCard's rename trigger already opens the
-    // sign-in modal instead of entering edit mode. Guarded anyway.
     if (demo) {
       onRequireSignIn?.();
       return;
@@ -181,9 +153,6 @@ export function BankPane({
           <UploadIcon className="size-3" />
           Upload
         </button>
-        {/* The button above redirects to /login in demo mode instead of
-            setting importModalOpen, so this never opens there. Left
-            unmounted entirely for defense in depth. */}
         {!demo && (
           <ImportReviewModal
             open={importModalOpen}
@@ -195,11 +164,7 @@ export function BankPane({
         )}
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        {/* pr-4, not pr-2 — the scrollbar (base-ui ScrollArea) is an overlay
-            that floats over the viewport rather than reserving its own
-            layout space, so the card list needs enough clearance that the
-            scrollbar's own hit area (w-2.5) doesn't sit on top of card
-            content and steal its hover/click. */}
+        {/* The overlay scrollbar needs clearance from card controls. */}
         <div className="flex flex-col gap-4 pr-4 pb-4">
           {groups.length === 0 ? (
             <div className="rounded-md border border-dashed border-line-strong p-7 text-center text-[12.5px] text-faint">
@@ -343,9 +308,6 @@ function EntryEditDialog({
   );
 }
 
-// Static rendering of a bank card's look — used for the cross-pane
-// DragOverlay clone so a card being dragged into the outline still looks
-// like the card it came from, instead of jumping to a different style.
 export function BankEntryCardVisual({ entry }: { entry: BankEntryRow }) {
   return (
     <Card
@@ -409,8 +371,7 @@ function EntryCard({
   });
 
   function onPointerDownGuarded(e: PointerEvent<HTMLDivElement>) {
-    // Don't hijack typing in the name-edit input, or the edit button's own
-    // click — everything else on the card can start a drag.
+    // Interactive controls must not start a drag.
     if (e.target instanceof HTMLElement && e.target.closest("input, button"))
       return;
     listeners?.onPointerDown?.(e);
@@ -419,13 +380,7 @@ function EntryCard({
     e.stopPropagation();
   }
 
-  // While dragging, the DragOverlay clone (BankEntryCardVisual) is what
-  // follows the cursor — this source card just fades in place instead of
-  // also tracking the pointer, or the two would visibly move independently.
-  // Write the resting cursor only after pointer-enter. The implementation
-  // before the dnd-kit migration also updated React state on hover; restoring
-  // that DOM update prevents an occasional stale native cursor after Chrome
-  // moves the pointer onto a newly composited card.
+  // Reapply the cursor after Chrome moves onto a newly composited card.
   const style = {
     cursor: isDragging ? "grabbing" : hovering ? "grab" : undefined,
     ...(isDragging ? { opacity: 0.35 } : {}),
@@ -436,10 +391,6 @@ function EntryCard({
       ref={setNodeRef}
       size="sm"
       style={style}
-      // Resting shadow is soft/diffused (paper flat on the desk) rather than
-      // a hard flat offset — that flat-line look is what read as "AI card."
-      // Hover only lifts the shadow (no rotation) — the tilt-on-hover read
-      // as gimmicky once this became the drag source for a real editor.
       className={`touch-none select-none ${isDragging ? "z-20 cursor-grabbing shadow-[4px_7px_14px_-2px_rgba(18,24,28,0.28)]" : "z-0 cursor-auto shadow-[0_1px_2px_rgba(18,24,28,0.10)] transition-shadow duration-150 ease-out hover:z-10 hover:shadow-[3px_5px_10px_-2px_rgba(18,24,28,0.22)]"}`}
       {...attributes}
       {...listeners}
@@ -494,9 +445,6 @@ function EntryCard({
             {resumeSourceLabel(entry)}
           </div>
         </div>
-        {/* Explicit edit action — the card itself is the drag source
-            (grab cursor everywhere), so opening the editor needed its own
-            target instead of overloading a plain click on a draggable. */}
         <button
           onClick={onOpenEdit}
           onPointerDown={stopEditButtonDrag}

@@ -17,16 +17,13 @@ import {
   NEW_SECTION_DROP_ID,
   SECTION_APPEND_PREFIX,
 } from "@/components/dnd-ids";
+import {
+  moveCompositionSection,
+  removeCompositionEntry,
+  type EditorSection,
+} from "@/lib/editor-composition";
 
-export interface EditorSection {
-  title: string;
-  entries: string[]; // bank_entry ids, ordered
-}
-
-// dnd handling (DndContext, sensors, drag-start/over/end) lives in
-// ResumeEditor now — it's the ancestor of both BankPane and OutlinePane, so
-// a single DndContext there is what lets a card dragged from the bank land
-// in a section here. This component only renders the sortable tree.
+export type { EditorSection } from "@/lib/editor-composition";
 
 export function OutlinePane({
   sections,
@@ -37,40 +34,20 @@ export function OutlinePane({
   sections: EditorSection[];
   entryById: Map<string, BankEntryRow>;
   onChange: (next: EditorSection[]) => void;
-  // The bank entry currently being dragged, if any — lets a section's "Add
-  // to this section" box turn red while hovering a card that belongs to a
-  // different section instead of just staying neutral.
   draggedEntry?: BankEntryRow;
 }) {
   function removeEntry(sectionTitle: string, entryId: string) {
-    const next = sections
-      .map((s) =>
-        s.title === sectionTitle
-          ? { ...s, entries: s.entries.filter((id) => id !== entryId) }
-          : s,
-      )
-      .filter((s) => s.entries.length > 0);
-    onChange(next);
+    onChange(removeCompositionEntry(sections, sectionTitle, entryId));
   }
 
-  // Section order moved off drag-and-drop to the up/down arrows below — with
-  // only ever a handful of sections, arrows are more precise and don't fight
-  // with the bank-card drop targets sharing the same DndContext.
   function moveSection(sectionTitle: string, direction: "up" | "down") {
-    const index = sections.findIndex((s) => s.title === sectionTitle);
-    const swapWith = direction === "up" ? index - 1 : index + 1;
-    if (index === -1 || swapWith < 0 || swapWith >= sections.length) return;
-    const next = sections.slice();
-    [next[index], next[swapWith]] = [next[swapWith], next[index]];
-    onChange(next);
+    onChange(moveCompositionSection(sections, sectionTitle, direction));
   }
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       <ScrollArea className="min-h-0 flex-1">
-        {/* pr-4, not pr-2 — see bank-pane.tsx's identical comment: the
-            base-ui ScrollArea's scrollbar overlays content instead of
-            reserving its own layout space. */}
+        {/* The overlay scrollbar needs clearance from card controls. */}
         <div className="flex flex-col gap-4 pr-4">
           {sections.map((section, index) => (
             <OutlineSection
@@ -125,10 +102,7 @@ function OutlineSection({
   return (
     <div>
       <div className="mb-2 flex items-center gap-1.5">
-        {/* Grouping label only (Education/Experience/Projects/Leadership/
-            Other) — same bucketing as the bank pane. The real title
-            (section.title) still drives drag ids, drop targets, and
-            move-up/down; only this heading text is bucketed. */}
+        {/* Display labels may be grouped, but section titles remain identity keys. */}
         <div className="flex-1 font-mono text-[10.5px] uppercase tracking-wide text-muted-fg">
           {sectionGroupLabel(section.title)}
         </div>
@@ -177,9 +151,6 @@ function OutlineSection({
   );
 }
 
-// Explicit, always-visible drop target — dragging a card here (rather than
-// anywhere in the pane) is what actually places it, so adding an entry is a
-// deliberate drop, not a side effect of wherever the pointer let go.
 function DropBox({
   id,
   label,

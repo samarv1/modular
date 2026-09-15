@@ -13,20 +13,13 @@ import {
   bankEntryToHeaderData,
 } from "@/lib/bank-entry-fields";
 import { sectionGroupLabel } from "@/lib/section-label";
+import { groupEntriesBySection } from "@/lib/group-by-section";
 import type { ExtractedEntry } from "@/lib/resume-extraction-schema";
 import type { BankEntryRow } from "@/lib/rows";
 
 type Phase = "loading" | "ready" | "saving";
 type HeaderDraft = { name: string; contactLine: string };
 
-// The structured-field counterpart to PdfImportBody, for editing entries
-// that already exist in the bank (opened from the desktop's Bank folder,
-// see import-review-modal.tsx's editSourceResume mode) rather than
-// reviewing a fresh extraction before it's committed. Reconstructs an
-// editable field set from each entry's immutable raw_latex
-// (bank-entry-fields.ts) and, on save, PATCHes each entry back with its
-// current fields — the API regenerates raw_latex server-side (see
-// /api/entries/[id]/route.ts).
 export function EditSourceResumeBody({
   sourceResumeId,
   onSaved,
@@ -45,7 +38,8 @@ export function EditSourceResumeBody({
     Record<string, ExtractedEntry>
   >({});
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
-  const [dirty, setDirty] = useState(false);
+  const [dirtyEntryIds, setDirtyEntryIds] = useState<Set<string>>(new Set());
+  const [headerDirty, setHeaderDirty] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,26 +79,18 @@ export function EditSourceResumeBody({
     };
   }, [sourceResumeId]);
 
-  // First-appearance order, mirroring the bank pane's own section grouping.
   const groups = useMemo(() => {
-    const order: string[] = [];
-    const byLabel = new Map<string, BankEntryRow[]>();
-    for (const entry of entries) {
-      if (removedIds.has(entry.id)) continue;
-      if (!byLabel.has(entry.source_section)) {
-        order.push(entry.source_section);
-        byLabel.set(entry.source_section, []);
-      }
-      byLabel.get(entry.source_section)!.push(entry);
-    }
-    return order.map((label): [string, BankEntryRow[]] => [
-      label,
-      byLabel.get(label)!,
+    return groupEntriesBySection(
+      entries.filter((entry) => !removedIds.has(entry.id)),
+      (entry) => entry.source_section,
+    ).map(({ key, entries: groupEntries }): [string, BankEntryRow[]] => [
+      key,
+      groupEntries,
     ]);
   }, [entries, removedIds]);
 
   function updateEntry(id: string, patch: Partial<ExtractedEntry>) {
-    setDirty(true);
+    setDirtyEntryIds((current) => new Set(current).add(id));
     setEntryDrafts((prev) => ({
       ...prev,
       [id]: { ...prev[id], ...patch } as ExtractedEntry,
@@ -112,45 +98,40 @@ export function EditSourceResumeBody({
   }
 
   function removeEntry(id: string) {
-    setDirty(true);
     setRemovedIds((prev) => new Set(prev).add(id));
+    setDirtyEntryIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
   }
 
   async function save() {
     setPhase("saving");
     setErrorMessage(null);
     try {
-      const patches = entries
-        .filter((e) => !removedIds.has(e.id))
-        .map((e) =>
-          fetch(`/api/entries/${e.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ entry: entryDrafts[e.id] }),
-          }),
-        );
-      const headerPatch =
-        headerEntryId && headerDraft
-          ? [
-              fetch(`/api/entries/${headerEntryId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ header: headerDraft }),
-              }),
-            ]
-          : [];
-      const deletes = Array.from(removedIds).map((id) =>
-        fetch(`/api/entries/${id}`, { method: "DELETE" }),
-      );
-
-      const results = await Promise.all([
-        ...patches,
-        ...headerPatch,
-        ...deletes,
-      ]);
-      const failed = results.find((r) => !r.ok);
-      if (failed) {
-        const body = await failed.json().catch(() => null);
+      const updates: Array<{
+        id: string;
+        entry?: ExtractedEntry;
+        header?: HeaderDraft;
+      }> = entries
+        .filter(
+          (entry) => dirtyEntryIds.has(entry.id) && !removedIds.has(entry.id),
+        )
+        .map((entry) => ({ id: entry.id, entry: entryDrafts[entry.id] }));
+      if (headerDirty && headerEntryId && headerDraft) {
+        updates.push({ id: headerEntryId, header: headerDraft });
+      }
+      const response = await fetch(`/api/source-resumes/${sourceResumeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          updates,
+          deleteIds: Array.from(removedIds),
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
         throw new Error(
           typeof body?.error === "string"
             ? body.error
@@ -194,7 +175,7 @@ export function EditSourceResumeBody({
           <HeaderFieldsEditor
             header={headerDraft}
             onChange={(patch) => {
-              setDirty(true);
+              setHeaderDirty(true);
               setHeaderDraft({ ...headerDraft, ...patch });
             }}
           />
@@ -229,7 +210,13 @@ export function EditSourceResumeBody({
         >
           Cancel
         </Button>
-        <Button onClick={save} disabled={phase === "saving" || !dirty}>
+        <Button
+          onClick={save}
+          disabled={
+            phase === "saving" ||
+            (dirtyEntryIds.size === 0 && !headerDirty && removedIds.size === 0)
+          }
+        >
           {phase === "saving" ? (
             <Loader2 className="size-3.5 animate-spin" />
           ) : (

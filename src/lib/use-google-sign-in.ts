@@ -3,8 +3,6 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/browser";
 
-// Shared by /login and SignInModal, so both entry points fire the same
-// OAuth call and stay in sync if the redirect target or provider changes.
 export function useGoogleSignIn() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);

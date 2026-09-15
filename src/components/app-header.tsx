@@ -6,11 +6,6 @@ import { Button } from "@/components/ui/button";
 // Top bar for the home/desktop page (its only caller). "Modular" is static
 // text, not a link — navigation back to the desktop elsewhere in the app is
 // the explicit "← Desktop" button (back-to-desktop.tsx), not the wordmark.
-//
-// `demo` is the anonymous playground (no session): Settings/Sign out have
-// nothing to act on, so a single sign-in button takes their place instead,
-// opening the same SignInModal every other demo action does (see Desktop,
-// its only caller with demo set).
 export function AppHeader({
   demo = false,
   onSignInClick,

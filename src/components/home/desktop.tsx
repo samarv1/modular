@@ -50,8 +50,6 @@ import { nextPlacement, nextFreePlacement } from "@/lib/desktop-placement";
 import { STATIC_PAGES } from "@/lib/static-pages";
 import { pagePositionKey } from "@/lib/static-page-position";
 
-// Same select-on-click, open-on-double-click pattern as ResumeIcon, minus
-// drag (bank uploads aren't repositionable/foldered, just a plain list).
 function BankFileIcon({
   title,
   selected,
@@ -83,9 +81,6 @@ function BankFileIcon({
   );
 }
 
-// Shared look for the desktop's small text toolbar actions (New folder, New
-// resume, Delete, Import) — only the icon/label/tone/enabled state differ
-// between them.
 function ToolbarButton({
   icon: Icon,
   label,
@@ -135,27 +130,19 @@ function BackDrop({ onClick }: { onClick: () => void }) {
 export function Desktop({
   initialFolders,
   initialResumes,
-  hasTemplateShell,
+  initialBankFiles,
   demo = false,
-  demoSourceResume,
 }: {
   initialFolders: ResumeFolderRow[];
   initialResumes: ResumeRow[];
-  hasTemplateShell: boolean;
-  // Anonymous playground: no session, so nothing here can be created,
-  // deleted, uploaded, or opened for editing. Arranging what's already on
-  // the desktop (icon drag) stays local; everything else opens the sign-in
-  // modal. See src/lib/sample-resume/demo-workspace.ts.
+  initialBankFiles: SourceResumeRow[];
   demo?: boolean;
-  demoSourceResume?: SourceResumeRow;
 }) {
   const router = useRouter();
   const [folders, setFolders] = useState(initialFolders);
   const [resumes, setResumes] = useState(initialResumes);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
-  // Finder-style selection: one item at a time, first click highlights and
-  // the second (double) click opens.
   const [selected, setSelected] = useState<{
     kind: "folder" | "resume" | "page" | "bank";
     id: string;
@@ -163,8 +150,6 @@ export function Desktop({
   const [error, setError] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
-  // Set when a Bank folder item is opened, so the same modal instance shows
-  // that upload's real entries (edit mode) instead of the file-pick flow.
   const [editingSourceResume, setEditingSourceResume] = useState<{
     id: string;
     displayName: string;
@@ -172,9 +157,7 @@ export function Desktop({
   const resumePatchVersions = useRef(new Map<string, number>());
   const folderPatchVersions = useRef(new Map<string, number>());
   const [signInOpen, setSignInOpen] = useState(false);
-  function requireSignIn() {
-    setSignInOpen(true);
-  }
+  const requireSignIn = () => setSignInOpen(true);
 
   const showError = useCallback((message: string) => {
     setError(message);
@@ -189,23 +172,12 @@ export function Desktop({
     [],
   );
 
-  // Which permanent static page (e.g. About) is open, if any — mutually
-  // exclusive with currentFolderId, its own view rather than a folder.
   const [openPageId, setOpenPageId] = useState<string | null>(null);
   const openPage = STATIC_PAGES.find((p) => p.id === openPageId) ?? null;
 
-  // The "Bank" static page just lists what you've uploaded (one icon per
-  // source_resume, not clickable yet — see PLAN.md Phase 7 note for the
-  // real per-upload preview this'll grow into). Not owner data Desktop
-  // already has, so it's fetched client-side — but eagerly (not only once
-  // the page is opened), since the closed folder icon also needs to know
-  // whether there's anything inside to show the non-empty "peek" glyph.
-  const [bankFiles, setBankFiles] = useState<SourceResumeRow[] | null>(
-    demo && demoSourceResume ? [demoSourceResume] : null,
-  );
+  const [bankFiles, setBankFiles] =
+    useState<SourceResumeRow[]>(initialBankFiles);
   const refreshBankFiles = useCallback(() => {
-    // Demo mode never imports anything new, so there's nothing to refresh.
-    // bankFiles was seeded with the fixture's one entry above.
     if (demo) return;
     fetch("/api/source-resumes")
       .then((res) => {
@@ -215,22 +187,9 @@ export function Desktop({
       .then((body) => setBankFiles(body.sourceResumes ?? []))
       .catch(() => showError("Bank files could not be loaded."));
   }, [demo, showError]);
-  useEffect(() => {
-    refreshBankFiles();
-  }, [refreshBankFiles]);
+  const templateShellAvailable = bankFiles.length > 0;
 
-  // A template shell created by a past import outlives the bank resumes that
-  // created it (deleting a bank resume never deletes the shell), so "can I
-  // create a blank resume" has to track the live bank count, not just
-  // whether a shell was ever made. Falls back to the server-computed prop
-  // only until the client-side bank fetch above resolves.
-  const templateShellAvailable =
-    bankFiles === null ? hasTemplateShell : bankFiles.length > 0;
-
-  // Static pages aren't owner data, so their desktop position lives in
-  // localStorage, not the DB. Seeded with a grid default here (SSR-safe —
-  // no localStorage access during render) and overwritten client-side once
-  // mounted, if a saved position exists.
+  // Static page positions stay local because they are not owner data.
   const [pagePositions, setPagePositions] = useState<
     Record<string, { x: number; y: number }>
   >(() => {
@@ -242,9 +201,6 @@ export function Desktop({
     return initial;
   });
   useEffect(() => {
-    // One-time read-through from localStorage on mount, not a subscription —
-    // window/localStorage don't exist during SSR, so this can't happen
-    // during render without a hydration mismatch.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPagePositions((cur) => {
       const next = { ...cur };
@@ -257,7 +213,7 @@ export function Desktop({
             next[page.id] = { x: Number(parsed.x), y: Number(parsed.y) };
           }
         } catch {
-          // ignore malformed/stale localStorage value, keep the grid default
+          // Invalid saved positions fall back to the grid default.
         }
       }
       return next;
@@ -268,9 +224,6 @@ export function Desktop({
     window.localStorage.setItem(pagePositionKey(id), JSON.stringify({ x, y }));
   }
 
-  // What's actually occupying the desktop's top-level grid right now — static
-  // pages, folders, and top-level resumes — for nextFreePlacement to scan
-  // against, rather than trusting a count of how many items we think exist.
   function occupiedRootPositions(): { x: number; y: number }[] {
     return [
       ...STATIC_PAGES.map((page) => pagePositions[page.id]).filter(
@@ -300,20 +253,23 @@ export function Desktop({
     () => resumes.filter((r) => (r.folder_id ?? null) === currentFolderId),
     [resumes, currentFolderId],
   );
+  const nonEmptyFolderIds = useMemo(
+    () =>
+      new Set(
+        resumes
+          .map((resume) => resume.folder_id)
+          .filter((id): id is string => id !== null),
+      ),
+    [resumes],
+  );
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
 
-  // Persisted immediately on drop, not debounced — unlike the editor's
-  // composition autosave (which coalesces many rapid edits), a drag-end
-  // here is already one discrete commit. Debouncing it only risked losing
-  // the write if the user navigated away (e.g. double-clicked a resume open)
-  // before the delay elapsed.
+  // Drag-end writes immediately because navigation can follow the drop.
   function patchResume(
     id: string,
     values: Record<string, unknown>,
     previous: ResumeRow,
   ) {
-    // Demo mode: the caller already applied the optimistic update locally
-    // (see handleDragEnd), so icon dragging works, it just never persists.
     if (demo) return;
     const version = (resumePatchVersions.current.get(id) ?? 0) + 1;
     resumePatchVersions.current.set(id, version);
@@ -347,8 +303,6 @@ export function Desktop({
     values: Record<string, unknown>,
     previous: ResumeFolderRow,
   ) {
-    // Unreachable today: demo mode never has any folders, matching a fresh
-    // account. Guarded anyway in case a folder ever appears there.
     if (demo) return;
     const version = (folderPatchVersions.current.get(id) ?? 0) + 1;
     folderPatchVersions.current.set(id, version);
@@ -427,10 +381,7 @@ export function Desktop({
         );
         return;
       }
-      // Dropped in open canvas — just reposition within the current container.
-      // Rounded because delta.x/y are fractional (subpixel drag deltas), and
-      // position_x/position_y are integer columns — an unrounded value failed
-      // the PATCH with a Postgres 22P02 error that got silently swallowed.
+      // Postgres integer columns require rounded subpixel drag deltas.
       const nextX = Math.round(resume.position_x + delta.x);
       const nextY = Math.round(resume.position_y + delta.y);
       setResumes((cur) =>
@@ -493,8 +444,6 @@ export function Desktop({
   }
 
   async function renameFolder(id: string, name: string) {
-    // Unreachable today: demo has no folders, and createFolder already
-    // redirects before one can exist. Guarded anyway.
     if (demo) {
       requireSignIn();
       return;
@@ -510,10 +459,6 @@ export function Desktop({
     patchFolder(id, { name: trimmed }, previous);
   }
 
-  // Confirmation is a controlled AlertDialog (not window.confirm) so it
-  // matches the app's own styling — deleteTarget holds what's pending
-  // confirmation, separate from `selected` so the dialog survives even if
-  // the click that opened it also happened to deselect the icon.
   const [deleteTarget, setDeleteTarget] = useState<{
     kind: "folder" | "resume" | "bank";
     id: string;
@@ -534,12 +479,7 @@ export function Desktop({
     bank: "source-resumes",
   };
 
-  // Backend orphans the folder's resumes (folder_id -> null) rather than
-  // deleting them (0003_folders.sql, ON DELETE SET NULL) — mirror that here
-  // so they reappear on the desktop instead of vanishing from local state.
-  // A bank upload's DELETE removes its bank_entry rows outright (including
-  // any placed in a resume outline), so bankFiles is the only local state
-  // to update for that kind.
+  // ON DELETE SET NULL requires folder resumes to return to local desktop state.
   async function performDelete() {
     if (!deleteTarget) return;
     const { kind, id } = deleteTarget;
@@ -558,7 +498,7 @@ export function Desktop({
       } else if (kind === "resume") {
         setResumes((cur) => cur.filter((r) => r.id !== id));
       } else {
-        setBankFiles((cur) => (cur ? cur.filter((f) => f.id !== id) : cur));
+        setBankFiles((cur) => cur.filter((f) => f.id !== id));
       }
     } catch {
       showError(
@@ -580,9 +520,6 @@ export function Desktop({
           ? bankFiles?.find((f) => f.id === deleteTarget.id)?.display_name
           : undefined;
 
-  // Available both at the top level and inside a folder — creating from
-  // inside a folder drops the new resume straight into it, not onto the
-  // desktop underneath.
   async function createResume() {
     if (demo) {
       requireSignIn();
@@ -701,9 +638,6 @@ export function Desktop({
         )}
       </div>
 
-      {/* Every opener above redirects to /login in demo mode instead of
-          setting importModalOpen, so this never opens there. Left unmounted
-          entirely for defense in depth. */}
       {!demo && (
         <ImportReviewModal
           open={importModalOpen}
@@ -724,16 +658,9 @@ export function Desktop({
         collisionDetection={pointerWithin}
         onDragEnd={handleDragEnd}
       >
-        {/* Bounded workspace panel, not an edge-to-edge desktop — a handful
-            of icons on a full-viewport canvas read as mostly empty space, so
-            this centers a fixed-size "desk" instead of filling the pane. No
-            background here — the page body's own dot-grid (globals.css)
-            shows through, so the paper texture reads as one continuous
-            surface rather than stopping at the panel's edge. */}
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
           <div
-            // Clicking bare canvas deselects — the target check keeps clicks
-            // that bubbled up from an icon from immediately clearing it.
+            // Ignore bubbled icon clicks when clearing the selection.
             onClick={(e) => {
               if (e.target === e.currentTarget) setSelected(null);
             }}
@@ -746,11 +673,7 @@ export function Desktop({
           >
             {openPage?.kind === "bank" ? (
               <div className="absolute inset-0 overflow-auto p-8">
-                {bankFiles === null ? (
-                  <div className="flex h-full items-center justify-center text-[12.5px] text-faint">
-                    Loading…
-                  </div>
-                ) : bankFiles.length === 0 ? (
+                {bankFiles.length === 0 ? (
                   <div className="flex h-full items-center justify-center text-[12.5px] text-faint">
                     Nothing uploaded yet.
                   </div>
@@ -818,7 +741,7 @@ export function Desktop({
                     name={folder.name}
                     x={folder.position_x}
                     y={folder.position_y}
-                    hasContents={resumes.some((r) => r.folder_id === folder.id)}
+                    hasContents={nonEmptyFolderIds.has(folder.id)}
                     renaming={renamingFolderId === folder.id}
                     selected={
                       selected?.kind === "folder" && selected.id === folder.id

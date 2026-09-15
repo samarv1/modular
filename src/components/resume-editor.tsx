@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent,
+} from "react";
 import {
   DndContext,
   DragOverlay,
@@ -12,15 +19,12 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { Pencil } from "lucide-react";
 import { BackToDesktopLink } from "@/components/back-to-desktop";
 import { BankPane, BankEntryCardVisual } from "@/components/bank/bank-pane";
 import { SignInModal } from "@/components/sign-in-modal";
-import {
-  OutlinePane,
-  type EditorSection,
-} from "@/components/outline/outline-pane";
+import { OutlinePane } from "@/components/outline/outline-pane";
 import { PreviewPane } from "@/components/preview/preview-pane";
 import {
   BANK_DRAG_PREFIX,
@@ -29,6 +33,13 @@ import {
 } from "@/components/dnd-ids";
 import type { BankEntryRow } from "@/lib/rows";
 import { clearHoverCursor, setHoverCursor } from "@/lib/hover-cursor";
+import { createAutosaveQueue } from "@/lib/autosave-queue";
+import {
+  addCompositionEntry,
+  moveCompositionEntry,
+  reorderCompositionEntry,
+  type EditorSection,
+} from "@/lib/editor-composition";
 import type {
   ResumeMetaRow,
   ResumeSectionRow,
@@ -38,10 +49,6 @@ import {
   saveDemoComposition,
 } from "@/lib/demo-composition-store";
 
-// Single current-resume title, click-to-rename. Switching between resumes
-// happens on the home page (src/app/page.tsx) — this editor only ever works
-// on the one resume its route (/resume/[id]) was opened for, so there's no
-// tab strip to manage here.
 function ResumeTitle({
   resume,
   renaming,
@@ -59,9 +66,6 @@ function ResumeTitle({
   if (renaming) {
     return (
       <input
-        // Remounts fresh each time rename mode opens (see the `key` at the
-        // call site) — autoFocus/select-on-focus fire naturally on mount
-        // instead of needing an effect to sync draft to the latest title.
         autoFocus
         onFocus={(e) => e.currentTarget.select()}
         value={draft}
@@ -99,9 +103,6 @@ function ResumeTitle({
   );
 }
 
-// Adjustable divider — wider invisible hit area than the visible line
-// itself, so it's easy to grab without needing pixel precision. Shared by
-// both dividers in the three-pane split below.
 function SplitDivider({
   label,
   active,
@@ -178,15 +179,9 @@ export function ResumeEditor({
   initialPdfUrl?: string | null;
   initialPdfDownloadUrl?: string | null;
   initialRenaming?: boolean;
-  // Anonymous playground: no session, so nothing here persists. Outline
-  // drag/reorder/remove stays local; rename, compile, and export open the
-  // sign-in modal. See src/lib/sample-resume/demo-workspace.ts.
   demo?: boolean;
 }) {
   const [entries, setEntries] = useState(initialEntries);
-  // Always the resume this route (/resume/[id]) was opened for — switching
-  // resumes happens by navigating, on the home page, not by swapping state
-  // here.
   const [resume, setResume] = useState(initialResume);
   const [sections, setSections] = useState<EditorSection[]>(
     toEditorSections(initialSections),
@@ -197,29 +192,21 @@ export function ResumeEditor({
   const [pdfDownloadUrl, setPdfDownloadUrl] = useState(initialPdfDownloadUrl);
   const [compiling, setCompiling] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const compileRunRef = useRef(0);
+  const compilingRef = useRef(false);
+  const exportRunRef = useRef(0);
+  const exportingRef = useRef(false);
   const [signInOpen, setSignInOpen] = useState(false);
   const requireSignIn = () => setSignInOpen(true);
-
-  // Demo mode's outline lives in sessionStorage, not the DB (see
-  // updateSections below), so restore it here rather than in the useState
-  // initializer above: sessionStorage doesn't exist during SSR, and reading
-  // it there would mismatch the server-rendered empty outline.
-  useEffect(() => {
-    if (!demo) return;
-    const stored = loadDemoComposition();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (stored) setSections(stored);
-    // Runs once on mount only. demo is a static prop and this route is
-    // opened fresh for each resume.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  // A freshly-created resume (via the home page's "New resume", which
-  // navigates here with ?new=1) opens straight into rename mode rather than
-  // just appearing with the default "Untitled resume" title — that's the
-  // signal that you're now working on something new, and gets it named in
-  // the same motion instead of leaving the default title to edit later.
   const [renaming, setRenaming] = useState(initialRenaming);
   const addErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!demo) return;
+    const stored = loadDemoComposition(initialEntries);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (stored) setSections(stored);
+  }, [demo, initialEntries]);
 
   useEffect(
     () => () => {
@@ -244,38 +231,9 @@ export function ResumeEditor({
     [sections],
   );
 
-  // Composition writes are serialized and coalesced: while one request is in
-  // flight, only the newest pending snapshot is retained. This prevents an
-  // older request from finishing after a newer one and overwriting it.
-  const saveQueueRef = useRef<{
-    running: boolean;
-    pending: EditorSection[] | null;
-  }>({ running: false, pending: null });
-
-  // Nothing persists a failed or not-yet-sent composition save across a
-  // reload — only the manual Retry button recovers it. Warn before the
-  // browser throws that state away instead of losing it silently.
-  useEffect(() => {
-    function handleBeforeUnload(e: BeforeUnloadEvent) {
-      const hasUnsavedChanges =
-        saveError !== null || saveQueueRef.current.pending !== null;
-      if (!hasUnsavedChanges) return;
-      e.preventDefault();
-      e.returnValue = "";
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [saveError]);
-
-  async function drainCompositionSaves() {
-    const queue = saveQueueRef.current;
-    if (queue.running) return;
-    queue.running = true;
-
-    while (queue.pending) {
-      const snapshot = queue.pending;
-      queue.pending = null;
-      try {
+  const [saveQueue] = useState(() =>
+    createAutosaveQueue(
+      async (snapshot) => {
         const res = await fetch(`/api/resumes/${resume.id}/composition`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -283,32 +241,33 @@ export function ResumeEditor({
           keepalive: true,
         });
         if (!res.ok) throw new Error("composition save failed");
-        setSaveError(null);
-      } catch {
-        setSaveError("Changes could not be saved.");
-        if (!queue.pending) {
-          break;
-        }
-      }
-    }
+      },
+      (failed) => setSaveError(failed ? "Changes could not be saved." : null),
+    ),
+  );
 
-    queue.running = false;
-    if (queue.pending) void drainCompositionSaves();
-  }
+  // Reloading discards queued or failed composition saves.
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (!saveQueue.hasUnsavedWork()) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [saveQueue]);
 
   function queueCompositionSave(next: EditorSection[]) {
-    // Demo mode: persist to sessionStorage instead of the server, so the
-    // outline survives a "← Desktop" and back but never touches /api/*.
     if (demo) {
       saveDemoComposition(next);
       return;
     }
-    const queue = saveQueueRef.current;
-    queue.pending = next.map((section) => ({
-      ...section,
-      entries: [...section.entries],
-    }));
-    void drainCompositionSaves();
+    saveQueue.enqueue(
+      next.map((section) => ({
+        ...section,
+        entries: [...section.entries],
+      })),
+    );
   }
 
   function updateSections(next: EditorSection[]) {
@@ -342,15 +301,22 @@ export function ResumeEditor({
     }
   }
 
-  // Compile is synchronous on the server (it awaits the whole Sandbox round
-  // trip), so this just awaits one fetch — no polling loop needed, the
-  // response already carries the final status.
   async function compileResume() {
     if (demo) {
       requireSignIn();
       return;
     }
+    if (compilingRef.current) return;
+    compilingRef.current = true;
+    const run = ++compileRunRef.current;
     setCompiling(true);
+    if (!(await saveQueue.flush())) {
+      if (compileRunRef.current === run) {
+        compilingRef.current = false;
+        setCompiling(false);
+      }
+      return;
+    }
     setResume((cur) => ({
       ...cur,
       compile_status: "compiling",
@@ -368,6 +334,7 @@ export function ResumeEditor({
         pdfDownloadUrl?: string | null;
         error?: string;
       };
+      if (compileRunRef.current !== run) return;
       if (!res.ok) {
         setResume((cur) => ({
           ...cur,
@@ -385,106 +352,78 @@ export function ResumeEditor({
       setPdfUrl(body.pdfUrl ?? null);
       setPdfDownloadUrl(body.pdfDownloadUrl ?? null);
     } catch {
+      if (compileRunRef.current !== run) return;
       setResume((cur) => ({
         ...cur,
         compile_status: "failed",
         compile_error: "Compile request failed.",
       }));
     } finally {
-      setCompiling(false);
+      if (compileRunRef.current === run) {
+        compilingRef.current = false;
+        setCompiling(false);
+      }
     }
   }
 
   async function exportResume() {
-    // Unreachable today: preview-pane.tsx only renders the Download button
-    // once pdfDownloadUrl is set, which compileResume's own redirect above
-    // never lets happen in demo mode. Guarded anyway.
     if (demo) {
       requireSignIn();
       return;
     }
+    if (exportingRef.current) return;
+    exportingRef.current = true;
+    const run = ++exportRunRef.current;
     setExporting(true);
+    if (!(await saveQueue.flush())) {
+      if (exportRunRef.current === run) {
+        exportingRef.current = false;
+        setExporting(false);
+      }
+      return;
+    }
     try {
       const res = await fetch(`/api/resumes/${resume.id}/export`);
       const body = (await res.json().catch(() => ({}))) as {
         zipDownloadUrl?: string;
         error?: string;
       };
+      if (exportRunRef.current !== run) return;
       if (!res.ok || !body.zipDownloadUrl) {
         showAddError(body.error ?? "Export failed.");
         return;
       }
       window.location.href = body.zipDownloadUrl;
     } catch {
+      if (exportRunRef.current !== run) return;
       showAddError("Export request failed.");
     } finally {
-      setExporting(false);
+      if (exportRunRef.current === run) {
+        exportingRef.current = false;
+        setExporting(false);
+      }
     }
   }
 
-  // Place `entry` into the section titled `targetSectionTitle` (created if it
-  // doesn't exist yet), inserted just before `insertBeforeId` or appended at
-  // the end.
   function placeEntry(
     entry: BankEntryRow,
     targetSectionTitle: string,
     insertBeforeId?: string,
   ) {
-    if (usedEntryIds.has(entry.id)) return;
-
-    const targetIndex = sections.findIndex(
-      (s) => s.title === targetSectionTitle,
+    const change = addCompositionEntry(
+      sections,
+      entry,
+      entryById,
+      targetSectionTitle,
+      insertBeforeId,
     );
-    const target = targetIndex === -1 ? null : sections[targetIndex];
-
-    // A section's title is its identity (see OutlinePane) — an entry can
-    // only land in a section whose title actually matches where it came
-    // from, so an Education entry can't be dropped into an Experience
-    // section just because that's where the pointer happened to be. Fails
-    // silently (card just snaps back) rather than surfacing an error banner.
-    if (
-      target &&
-      target.title.trim().toLowerCase() !==
-        entry.source_section.trim().toLowerCase()
-    ) {
-      return;
-    }
-
-    const targetHasChunk = target?.entries.some((id) => {
-      const kind = entryById.get(id)?.kind;
-      return kind === "section_chunk" || kind === "header_chunk";
-    });
-
-    if (
-      target &&
-      (targetHasChunk ||
-        entry.kind === "section_chunk" ||
-        entry.kind === "header_chunk")
-    ) {
+    if (change.error === "exclusive_entry") {
       showAddError(
         `"${targetSectionTitle}" already holds a section that must stay by itself.`,
       );
       return;
     }
-
-    if (target) {
-      const nextEntries = [...target.entries];
-      const insertAt = insertBeforeId
-        ? nextEntries.indexOf(insertBeforeId)
-        : -1;
-      if (insertAt === -1) nextEntries.push(entry.id);
-      else nextEntries.splice(insertAt, 0, entry.id);
-      updateSections(
-        sections.map((s, i) =>
-          i === targetIndex ? { ...s, entries: nextEntries } : s,
-        ),
-      );
-    } else {
-      updateSections([
-        ...sections,
-        { title: targetSectionTitle, entries: [entry.id] },
-      ]);
-    }
+    if (change.changed) updateSections(change.sections);
   }
 
   function findSectionIndexByEntryId(entryId: string) {
@@ -519,16 +458,14 @@ export function ResumeEditor({
     if (activeIdStr.startsWith(BANK_DRAG_PREFIX)) {
       const entry = entryById.get(activeIdStr.slice(BANK_DRAG_PREFIX.length));
       if (!entry) return;
-      // Placement only happens on an explicit target — a section's "+" box,
-      // an existing entry (insert before it), or the general "+" box — not
-      // from letting go anywhere in the pane.
+      // Only explicit drop targets may change the composition.
       if (overIdStr.startsWith(SECTION_APPEND_PREFIX)) {
         placeEntry(entry, overIdStr.slice(SECTION_APPEND_PREFIX.length));
       } else if (overIdStr === NEW_SECTION_DROP_ID) {
         placeEntry(entry, entry.source_section);
       } else {
         const sectionIndex = findSectionIndexByEntryId(overIdStr);
-        if (sectionIndex === -1) return; // not dropped on a recognized target — no-op, card snaps back
+        if (sectionIndex === -1) return;
         placeEntry(entry, sections[sectionIndex].title, overIdStr);
       }
       return;
@@ -548,52 +485,24 @@ export function ResumeEditor({
     if (toSectionIndex === -1) return;
 
     if (fromSectionIndex !== toSectionIndex) {
-      const draggedEntry = entryById.get(activeIdStr);
       const targetSection = sections[toSectionIndex];
-      if (
-        !draggedEntry ||
-        draggedEntry.source_section.trim().toLowerCase() !==
-          targetSection.title.trim().toLowerCase()
-      ) {
+      const change = moveCompositionEntry(
+        sections,
+        activeIdStr,
+        targetSection.title,
+        entryById,
+        overIdStr,
+      );
+      if (change.error === "source_mismatch") {
         showAddError("Entries can only be placed in their source section.");
         return;
       }
-      const targetHasChunk = targetSection.entries.some((id) => {
-        const kind = entryById.get(id)?.kind;
-        return kind === "section_chunk" || kind === "header_chunk";
-      });
-      if (
-        targetHasChunk ||
-        draggedEntry.kind === "section_chunk" ||
-        draggedEntry.kind === "header_chunk"
-      )
-        return;
-
-      const next = sections.map((section) => ({
-        ...section,
-        entries: [...section.entries],
-      }));
-      next[fromSectionIndex].entries = next[fromSectionIndex].entries.filter(
-        (id) => id !== activeIdStr,
-      );
-      const insertAt = next[toSectionIndex].entries.indexOf(overIdStr);
-      if (insertAt === -1) next[toSectionIndex].entries.push(activeIdStr);
-      else next[toSectionIndex].entries.splice(insertAt, 0, activeIdStr);
-      updateSections(next.filter((section) => section.entries.length > 0));
+      if (change.changed) updateSections(change.sections);
       return;
     }
 
-    const section = sections[fromSectionIndex];
-    const from = section.entries.indexOf(activeIdStr);
-    const to = section.entries.indexOf(overIdStr);
-    if (from === -1 || to === -1 || from === to) return;
-    updateSections(
-      sections.map((s, i) =>
-        i === fromSectionIndex
-          ? { ...s, entries: arrayMove(s.entries, from, to) }
-          : s,
-      ),
-    );
+    const change = reorderCompositionEntry(sections, activeIdStr, overIdStr);
+    if (change.changed) updateSections(change.sections);
   }
 
   const activeBankEntry = activeId?.startsWith(BANK_DRAG_PREFIX)
@@ -604,10 +513,7 @@ export function ResumeEditor({
       ? entryById.get(activeId)
       : undefined;
 
-  // Adjustable bank/outline/preview split, two independent dividers. Clamped
-  // so no pane can be dragged down to unusable — bounds are in percent of
-  // the split row's own width, not the viewport, so they hold up regardless
-  // of window size.
+  // Percentage bounds keep every pane usable at any viewport width.
   const [bankWidthPct, setBankWidthPct] = useState(38);
   const [previewWidthPct, setPreviewWidthPct] = useState(30);
   const [resizingSplit, setResizingSplit] = useState<
@@ -617,6 +523,10 @@ export function ResumeEditor({
     false,
   );
   const splitRowRef = useRef<HTMLDivElement>(null);
+  const splitDraftRef = useRef({
+    bank: bankWidthPct,
+    preview: previewWidthPct,
+  });
 
   function clampSplit(pct: number) {
     return Math.min(50, Math.max(15, pct));
@@ -631,14 +541,18 @@ export function ResumeEditor({
     if (!resizingSplit || !splitRowRef.current) return;
     const rect = splitRowRef.current.getBoundingClientRect();
     if (resizingSplit === "bank") {
-      setBankWidthPct(clampSplit(((e.clientX - rect.left) / rect.width) * 100));
+      const width = clampSplit(((e.clientX - rect.left) / rect.width) * 100);
+      splitDraftRef.current.bank = width;
+      splitRowRef.current.style.setProperty("--bank-width", `${width}%`);
     } else {
-      setPreviewWidthPct(
-        clampSplit(((rect.right - e.clientX) / rect.width) * 100),
-      );
+      const width = clampSplit(((rect.right - e.clientX) / rect.width) * 100);
+      splitDraftRef.current.preview = width;
+      splitRowRef.current.style.setProperty("--preview-width", `${width}%`);
     }
   }
   function onSplitPointerUp(e: PointerEvent<HTMLDivElement>) {
+    setBankWidthPct(splitDraftRef.current.bank);
+    setPreviewWidthPct(splitDraftRef.current.preview);
     setResizingSplit(false);
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
@@ -672,7 +586,7 @@ export function ResumeEditor({
           <span className="flex items-center gap-2 px-2 text-[11.5px] text-danger">
             {saveError}
             <button
-              onClick={() => queueCompositionSave(sections)}
+              onClick={() => void saveQueue.retry()}
               className="font-mono text-[10px] uppercase tracking-wide underline"
             >
               Retry
@@ -692,10 +606,16 @@ export function ResumeEditor({
         <div
           ref={splitRowRef}
           className={`flex min-h-0 flex-1 ${resizingSplit ? "cursor-col-resize select-none" : ""}`}
+          style={
+            {
+              "--bank-width": `${bankWidthPct}%`,
+              "--preview-width": `${previewWidthPct}%`,
+            } as CSSProperties
+          }
         >
           <div
             className="min-h-0 min-w-[15%]"
-            style={{ width: `${bankWidthPct}%` }}
+            style={{ width: "var(--bank-width)" }}
           >
             <BankPane
               entries={entries}
@@ -759,7 +679,7 @@ export function ResumeEditor({
           />
           <div
             className="min-h-0 min-w-[15%]"
-            style={{ width: `${previewWidthPct}%` }}
+            style={{ width: "var(--preview-width)" }}
           >
             <PreviewPane
               compileStatus={resume.compile_status}

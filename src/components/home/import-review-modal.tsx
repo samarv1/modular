@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useReducer, useRef } from "react";
 import { Loader2 } from "lucide-react";
 import {
   Dialog,
@@ -11,45 +11,24 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { sectionGroupLabel } from "@/lib/section-label";
+import { groupEntriesBySection } from "@/lib/group-by-section";
 import {
   EntryEditor,
   HeaderFieldsEditor,
 } from "@/components/bank/entry-editor";
-import {
-  bankEntryToExtractedEntry,
-  bankEntryToHeaderData,
-} from "@/lib/bank-entry-fields";
-import type { ExtractedEntry } from "@/lib/resume-extraction-schema";
 import type { BankEntryRow } from "@/lib/rows";
+import type { ExtractedEntry } from "@/lib/resume-extraction-schema";
 import { UploadZone } from "@/components/home/upload-zone";
 import { PdfImportBody } from "@/components/home/pdf-import-review-modal";
 import { EditSourceResumeBody } from "@/components/home/edit-source-resume-body";
 import { ImportErrorMessage } from "@/components/home/import-error-message";
+import {
+  importReviewReducer,
+  initialImportReviewState,
+  type ImportPreviewEntry,
+} from "@/lib/import-review-state";
 
-interface PreviewEntry {
-  key: string;
-  // Position in the flat extraction order, used to build /api/imports'
-  // overrides payload.
-  index: number;
-  kind: string;
-  sourceSection: string;
-  displayName: string;
-  rawLatex: string;
-  isDuplicate: boolean;
-}
-
-type Phase = "idle" | "loading" | "mismatch" | "review" | "committing" | "pdf";
-
-// Owns two lifecycles inside the same Dialog shell:
-//  - import: pick a file, preview what the extractor found (nothing
-//    persisted yet), fix mistakes, then commit via POST /api/imports.
-//  - edit (editSourceResume set): hands off entirely to
-//    EditSourceResumeBody, which loads an already-imported upload's real
-//    bank_entry rows into the same structured field editor the PDF-import
-//    flow uses, and saves changes directly (PATCH/DELETE /api/entries/:id).
-// Cancel before a successful commit is always a no-op for import mode
-// (mode=preview never touches storage or the DB); for edit mode it just
-// discards the local, unsaved edits.
+// Preview mode is read-only, so closing the dialog before commit has no side effects.
 export function ImportReviewModal({
   open,
   onOpenChange,
@@ -61,213 +40,139 @@ export function ImportReviewModal({
   onImported: (entries: BankEntryRow[]) => void;
   editSourceResume?: { id: string; displayName: string } | null;
 }) {
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [file, setFile] = useState<File | null>(null);
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [errorCode, setErrorCode] = useState<string | undefined>(undefined);
-  const [mismatchReport, setMismatchReport] = useState<{
-    reason: string;
-    details: string[];
-  } | null>(null);
-  const [entries, setEntries] = useState<PreviewEntry[]>([]);
-  const [removedIndices, setRemovedIndices] = useState<Set<number>>(new Set());
-  const [entryDrafts, setEntryDrafts] = useState<
-    Record<string, ExtractedEntry>
-  >({});
-  const [initialDrafts, setInitialDrafts] = useState<
-    Record<string, ExtractedEntry>
-  >({});
-  const [headerDraft, setHeaderDraft] = useState<{
-    name: string;
-    contactLine: string;
-  } | null>(null);
-  const [initialHeaderDraft, setInitialHeaderDraft] = useState<{
-    name: string;
-    contactLine: string;
-  } | null>(null);
+  const [state, dispatch] = useReducer(
+    importReviewReducer,
+    initialImportReviewState,
+  );
+  const phase = state.phase;
+  const review =
+    state.phase === "review" || state.phase === "committing" ? state : null;
+  const errorMessage = "message" in state ? state.message : undefined;
+  const errorCode = "code" in state ? state.code : undefined;
+  const previewGenerationRef = useRef(0);
 
   function reset() {
-    setPhase("idle");
-    setFile(null);
-    setPdfFile(null);
-    setErrorMessage(null);
-    setErrorCode(undefined);
-    setMismatchReport(null);
-    setEntries([]);
-    setRemovedIndices(new Set());
-    setEntryDrafts({});
-    setInitialDrafts({});
-    setHeaderDraft(null);
-    setInitialHeaderDraft(null);
+    previewGenerationRef.current += 1;
+    dispatch({ type: "reset" });
   }
 
-  // The shared UploadZone accepts both a LaTeX export (.zip) and a plain PDF
-  // resume (see upload-zone.tsx) — a PDF has no LaTeX to parse, so it skips
-  // straight to the structured-extraction review body (pdf-import-review-modal.tsx)
-  // instead of loadPreview's mode=preview call to /api/imports.
   function handleFileSelected(selected: File) {
     if (selected.name.toLowerCase().endsWith(".pdf")) {
-      setPdfFile(selected);
-      setPhase("pdf");
+      previewGenerationRef.current += 1;
+      dispatch({ type: "select_pdf", file: selected });
       return;
     }
     loadPreview(selected);
   }
 
   function close() {
+    previewGenerationRef.current += 1;
     onOpenChange(false);
   }
 
   async function loadPreview(selected: File) {
-    setFile(selected);
-    setPhase("loading");
-    setErrorMessage(null);
-    setErrorCode(undefined);
+    const generation = ++previewGenerationRef.current;
+    dispatch({ type: "preview_started", file: selected });
     try {
       const form = new FormData();
       form.set("file", selected);
       form.set("mode", "preview");
       const res = await fetch("/api/imports", { method: "POST", body: form });
       const body = await res.json().catch(() => null);
+      if (previewGenerationRef.current !== generation) return;
       if (res.ok && body?.compatible) {
-        // A non-Jake archive that got AI-converted comes back with the
-        // converted zip, so swap it in as the file we'll re-upload on
-        // commit: detectAdapter succeeds there directly and the AI
-        // conversion (and its usage against the cap) never runs twice for
-        // one import.
+        // Commit must reuse converted bytes to avoid charging for a second conversion.
         if (typeof body.convertedArchive === "string") {
           const bytes = Uint8Array.from(atob(body.convertedArchive), (c) =>
             c.charCodeAt(0),
           );
-          setFile(new File([bytes], selected.name, { type: selected.type }));
+          selected = new File([bytes], selected.name, { type: selected.type });
         }
-        const loaded: PreviewEntry[] = (
-          body.entries as (Omit<PreviewEntry, "key"> & { index: number })[]
+        const loaded: ImportPreviewEntry[] = (
+          body.entries as (Omit<ImportPreviewEntry, "key"> & {
+            index: number;
+          })[]
         ).map((entry) => ({ ...entry, key: String(entry.index) }));
-        setEntries(loaded);
-        setRemovedIndices(new Set());
-
-        const header = loaded.find((e) => e.kind === "header_chunk") ?? null;
-        const header0 = header
-          ? bankEntryToHeaderData({ raw_latex: header.rawLatex })
-          : null;
-        setHeaderDraft(header0);
-        setInitialHeaderDraft(header0);
-
-        const drafts = Object.fromEntries(
-          loaded
-            .filter((e) => e.kind !== "header_chunk")
-            .map((e) => [
-              e.key,
-              bankEntryToExtractedEntry({
-                kind: e.kind,
-                source_section: e.sourceSection,
-                raw_latex: e.rawLatex,
-                display_name: e.displayName,
-              }),
-            ]),
-        );
-        setEntryDrafts(drafts);
-        setInitialDrafts(drafts);
-
-        setPhase("review");
+        dispatch({ type: "preview_loaded", file: selected, entries: loaded });
         return;
       }
       if (body?.mismatchReport) {
-        setMismatchReport(body.mismatchReport);
-        setPhase("mismatch");
+        dispatch({ type: "preview_mismatch", report: body.mismatchReport });
         return;
       }
-      setErrorCode(
-        body?.code === "shared_key_cap_reached" ||
+      dispatch({
+        type: "preview_failed",
+        code:
+          body?.code === "shared_key_cap_reached" ||
           body?.code === "byok_key_rejected"
-          ? body.code
-          : undefined,
-      );
-      setErrorMessage(
-        typeof body?.error === "string"
-          ? body.error
-          : "could not read that file",
-      );
-      setPhase("idle");
+            ? body.code
+            : undefined,
+        message:
+          typeof body?.error === "string"
+            ? body.error
+            : "could not read that file",
+      });
     } catch {
-      setErrorMessage("could not read that file");
-      setPhase("idle");
+      if (previewGenerationRef.current !== generation) return;
+      dispatch({ type: "preview_failed", message: "could not read that file" });
     }
   }
 
-  // Matches PdfImportBody's removeEntry: takes the entry out of the review
-  // screen entirely (no reversible exclude toggle). The backend's own
-  // exact-duplicate check in commitImport runs unconditionally regardless
-  // of what's removed here, so a true duplicate is still silently skipped
-  // even if left in.
-  function removeEntry(entry: PreviewEntry) {
-    setRemovedIndices((prev) => new Set(prev).add(entry.index));
+  function removeEntry(entry: ImportPreviewEntry) {
+    dispatch({ type: "remove_entry", index: entry.index });
   }
 
   function updateEntryDraft(key: string, patch: Partial<ExtractedEntry>) {
-    setEntryDrafts((prev) => ({
-      ...prev,
-      [key]: { ...prev[key], ...patch } as ExtractedEntry,
-    }));
+    dispatch({ type: "update_entry", key, patch });
   }
 
-  const visibleEntries = entries.filter((e) => !removedIndices.has(e.index));
-  // The header entry is always committed (edited via HeaderFieldsEditor
-  // above the sections, no Remove button), so it's left out of these counts,
-  // otherwise "Approve (N)" and the summary line's entry count would
-  // include something not listed in any section.
-  const nonHeaderEntries = visibleEntries.filter(
-    (e) => e.kind !== "header_chunk",
-  );
-
-  // Grouped by section, in first-appearance order, header entry excluded
-  // (rendered separately via HeaderFieldsEditor, same as EditSourceResumeBody
-  // and PdfImportBody). Mirrors the bank pane's own grouping so the review
-  // screen reads like a preview of where things will land.
-  const groups = useMemo(() => {
-    const order: string[] = [];
-    const byLabel = new Map<string, PreviewEntry[]>();
-    for (const entry of nonHeaderEntries) {
-      if (!byLabel.has(entry.sourceSection)) {
-        order.push(entry.sourceSection);
-        byLabel.set(entry.sourceSection, []);
-      }
-      byLabel.get(entry.sourceSection)!.push(entry);
-    }
-    return order.map((label): [string, PreviewEntry[]] => [
-      label,
-      byLabel.get(label)!,
-    ]);
-  }, [nonHeaderEntries]);
+  const { nonHeaderEntries, groups } = useMemo(() => {
+    const visibleEntries =
+      review?.entries.filter(
+        (entry) => !review.removedIndices.has(entry.index),
+      ) ?? [];
+    const visibleNonHeaderEntries = visibleEntries.filter(
+      (entry) => entry.kind !== "header_chunk",
+    );
+    return {
+      nonHeaderEntries: visibleNonHeaderEntries,
+      groups: groupEntriesBySection(
+        visibleNonHeaderEntries,
+        (entry) => entry.sourceSection,
+      ).map(
+        ({ key, entries: groupEntries }): [string, ImportPreviewEntry[]] => [
+          key,
+          groupEntries,
+        ],
+      ),
+    };
+  }, [review]);
 
   async function commitImport() {
-    if (!file) return;
-    setPhase("committing");
-    setErrorMessage(null);
-    setErrorCode(undefined);
-    const overrides = entries
+    if (!review) return;
+    dispatch({ type: "commit_started" });
+    const overrides = review.entries
       .map((entry) => {
         const patch: Record<string, unknown> = { index: entry.index };
         let touched = false;
-        if (removedIndices.has(entry.index)) {
+        if (review.removedIndices.has(entry.index)) {
           patch.excluded = true;
           touched = true;
         }
         if (entry.kind === "header_chunk") {
           if (
-            headerDraft &&
-            JSON.stringify(headerDraft) !== JSON.stringify(initialHeaderDraft)
+            review.headerDraft &&
+            JSON.stringify(review.headerDraft) !==
+              JSON.stringify(review.initialHeaderDraft)
           ) {
-            patch.headerFields = headerDraft;
+            patch.headerFields = review.headerDraft;
             touched = true;
           }
         } else if (
-          JSON.stringify(entryDrafts[entry.key]) !==
-          JSON.stringify(initialDrafts[entry.key])
+          JSON.stringify(review.entryDrafts[entry.key]) !==
+          JSON.stringify(review.initialDrafts[entry.key])
         ) {
-          patch.entryFields = entryDrafts[entry.key];
+          patch.entryFields = review.entryDrafts[entry.key];
           touched = true;
         }
         return touched ? patch : null;
@@ -275,7 +180,7 @@ export function ImportReviewModal({
       .filter((o): o is Record<string, unknown> => o !== null);
     try {
       const form = new FormData();
-      form.set("file", file);
+      form.set("file", review.file);
       form.set("mode", "commit");
       if (overrides.length > 0)
         form.set("overrides", JSON.stringify(overrides));
@@ -286,21 +191,20 @@ export function ImportReviewModal({
         close();
         return;
       }
-      setErrorCode(
-        body?.code === "shared_key_cap_reached" ||
+      dispatch({
+        type: "commit_failed",
+        code:
+          body?.code === "shared_key_cap_reached" ||
           body?.code === "byok_key_rejected"
-          ? body.code
-          : undefined,
-      );
-      setErrorMessage(
-        typeof body?.error === "string"
-          ? body.error
-          : "upload failed, try again",
-      );
-      setPhase("review");
+            ? body.code
+            : undefined,
+        message:
+          typeof body?.error === "string"
+            ? body.error
+            : "upload failed, try again",
+      });
     } catch {
-      setErrorMessage("upload failed, try again");
-      setPhase("review");
+      dispatch({ type: "commit_failed", message: "upload failed, try again" });
     }
   }
 
@@ -344,8 +248,7 @@ export function ImportReviewModal({
                 <UploadZone
                   onFileSelected={handleFileSelected}
                   onRejected={(message) => {
-                    setErrorCode(undefined);
-                    setErrorMessage(message);
+                    dispatch({ type: "preview_failed", message });
                   }}
                 />
                 {errorMessage && (
@@ -354,9 +257,9 @@ export function ImportReviewModal({
               </div>
             )}
 
-            {phase === "pdf" && pdfFile && (
+            {state.phase === "pdf" && (
               <PdfImportBody
-                file={pdfFile}
+                file={state.file}
                 onImported={(imported) => {
                   onImported(imported);
                   close();
@@ -371,13 +274,13 @@ export function ImportReviewModal({
               </div>
             )}
 
-            {phase === "mismatch" && mismatchReport && (
+            {state.phase === "mismatch" && (
               <div className="flex flex-col gap-3">
                 <div className="rounded-md border border-danger/30 bg-danger/5 p-3 text-[12.5px] text-danger">
-                  {mismatchReport.reason}
-                  {mismatchReport.details.length > 0 && (
+                  {state.report.reason}
+                  {state.report.details.length > 0 && (
                     <ul className="mt-1.5 list-disc pl-4">
-                      {mismatchReport.details.map((detail, i) => (
+                      {state.report.details.map((detail, i) => (
                         <li key={i}>{detail}</li>
                       ))}
                     </ul>
@@ -399,23 +302,13 @@ export function ImportReviewModal({
                   {`Found ${groups.length} section${groups.length === 1 ? "" : "s"}, ${nonHeaderEntries.length} entr${nonHeaderEntries.length === 1 ? "y" : "ies"}. Review and edit before uploading.`}
                 </div>
 
-                {/* Bounded + self-scrolling, independent of the dialog's own
-                    sizing (the entry list is the only part that can get long,
-                    many sections, so it's the only part that scrolls). Header,
-                    summary, and footer stay put above/below it. Plain
-                    overflow-y-auto, not the app's ScrollArea (its Root didn't
-                    reliably pick up a bounded height from just max-h inside
-                    this Dialog, which reintroduced the earlier
-                    content-spilling-past-the-card bug). scrollbar-gutter:stable
-                    reserves the native scrollbar's width up front instead, so
-                    it doesn't reflow row content when it appears mid-scroll
-                    (the actual cause of the flicker). */}
+                {/* The native scrollbar gutter prevents row reflow in this bounded list. */}
                 <div className="flex max-h-[45vh] flex-col gap-4 overflow-y-auto pr-1 [scrollbar-gutter:stable]">
-                  {headerDraft && (
+                  {review?.headerDraft && (
                     <HeaderFieldsEditor
-                      header={headerDraft}
+                      header={review.headerDraft}
                       onChange={(patch) =>
-                        setHeaderDraft({ ...headerDraft, ...patch })
+                        dispatch({ type: "update_header", patch })
                       }
                     />
                   )}
@@ -427,7 +320,7 @@ export function ImportReviewModal({
                       {groupEntries.map((entry) => (
                         <EntryEditor
                           key={entry.key}
-                          entry={entryDrafts[entry.key]}
+                          entry={review!.entryDrafts[entry.key]}
                           onChange={(patch) =>
                             updateEntryDraft(entry.key, patch)
                           }
