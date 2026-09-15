@@ -15,11 +15,9 @@ import { ownerScopedTable } from "@/lib/db";
 import { SharedKeyCapExceededError } from "@/lib/ai-usage";
 import { ResumeExtractionAuthError } from "@/lib/resume-extraction";
 
-// Route handlers now resolve ownerId from a real Supabase Auth session
-// (src/lib/owner.ts), which isn't available in this test environment. These
-// tests hit the live Supabase project directly (owner_id has an auth.users
-// FK, see 0007_auth_owner_fk.sql), so TEST_OWNER_ID must be a real signed-in
-// user's id, not an arbitrary UUID — set it in .env to run this file.
+// Runs only through `npm run test:integration`. TEST_OWNER_ID must belong to
+// the dedicated Supabase test project configured through TEST_SUPABASE_*,
+// because owner_id has an auth.users foreign key.
 const testOwnerId = process.env.TEST_OWNER_ID!;
 vi.mock("@/lib/owner", () => ({ getOwnerId: async () => testOwnerId }));
 
@@ -62,7 +60,6 @@ vi.mock("@/lib/ai-usage", async () => {
 // Defaults to "no BYOK key configured"; individual BYOK tests override with
 // mockResolvedValueOnce.
 vi.mock("@/lib/byok-store", () => ({
-  hasByokKey: vi.fn().mockResolvedValue(false),
   getByokKey: vi.fn().mockResolvedValue(null),
 }));
 
@@ -72,7 +69,7 @@ const { uploadArchive } = await import("@/lib/storage");
 const { extractResumeStructure } = await import("@/lib/resume-extraction");
 const { reserveSharedKeyUsage, releaseSharedKeyUsage } =
   await import("@/lib/ai-usage");
-const { getByokKey, hasByokKey } = await import("@/lib/byok-store");
+const { getByokKey } = await import("@/lib/byok-store");
 
 // Every account is seeded with this exact fixture at first login
 // (src/lib/sample-resume/seed-sample-resume.ts), so uploading it verbatim here
@@ -521,7 +518,6 @@ describe("POST /api/imports: shared-key cap and BYOK", () => {
   it("skips the cap check entirely when the caller has a stored BYOK key", async () => {
     vi.mocked(reserveSharedKeyUsage).mockClear();
     vi.mocked(releaseSharedKeyUsage).mockClear();
-    vi.mocked(hasByokKey).mockResolvedValueOnce(true);
     vi.mocked(getByokKey).mockResolvedValueOnce("sk-test-key");
     vi.mocked(extractResumeStructure).mockResolvedValueOnce({
       header: { name: "Jane Doe", contactLine: "jane@example.com" },
@@ -551,7 +547,6 @@ describe("POST /api/imports: shared-key cap and BYOK", () => {
   it("surfaces byok_key_rejected and does not fall back to the shared key", async () => {
     vi.mocked(reserveSharedKeyUsage).mockClear();
     vi.mocked(releaseSharedKeyUsage).mockClear();
-    vi.mocked(hasByokKey).mockResolvedValueOnce(true);
     vi.mocked(getByokKey).mockResolvedValueOnce("sk-bad-key");
     vi.mocked(extractResumeStructure).mockRejectedValueOnce(
       new ResumeExtractionAuthError("mock: key rejected"),

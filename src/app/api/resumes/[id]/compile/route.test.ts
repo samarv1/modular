@@ -2,21 +2,21 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ownerScopedTable } from "@/lib/db";
 import { setResumeComposition } from "@/lib/composition";
 
-// Route handlers now resolve ownerId from a real Supabase Auth session
-// (src/lib/owner.ts), which isn't available in this test environment. These
-// tests hit the live Supabase project directly (owner_id has an auth.users
-// FK, see 0007_auth_owner_fk.sql), so TEST_OWNER_ID must be a real signed-in
-// user's id, not an arbitrary UUID — set it in .env to run this file.
+// Runs only through `npm run test:integration`. TEST_OWNER_ID must belong to
+// the dedicated Supabase test project configured through TEST_SUPABASE_*,
+// because owner_id has an auth.users foreign key.
 const testOwnerId = process.env.TEST_OWNER_ID!;
 vi.mock("@/lib/owner", () => ({ getOwnerId: async () => testOwnerId }));
 
 const compileLatexInSandbox = vi.fn();
 const uploadArchive = vi.fn().mockResolvedValue(undefined);
+const deleteArchive = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/sandbox-compile", () => ({
   compileLatexInSandbox: (...args: unknown[]) => compileLatexInSandbox(...args),
 }));
 vi.mock("@/lib/storage", () => ({
   uploadArchive: (...args: unknown[]) => uploadArchive(...args),
+  deleteArchive: (...args: unknown[]) => deleteArchive(...args),
   getSignedUrl: vi.fn().mockResolvedValue("https://example.com/signed"),
 }));
 
@@ -133,7 +133,8 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
 
     // Let the older, now-stale request finish after the newer one already won.
     resolveOlder(fakePdf("older"));
-    await olderCall;
+    const olderResponse = await olderCall;
+    expect(olderResponse.status).toBe(409);
 
     const { data: finalRow, error } = await ownerScopedTable(
       "resume",
@@ -156,6 +157,7 @@ describe("POST /api/resumes/:id/compile — compile races", () => {
     const newerPath = uploadArchive.mock.calls[0][0] as string;
     const olderPath = uploadArchive.mock.calls[1][0] as string;
     expect(newerPath).not.toBe(olderPath);
+    expect(deleteArchive).toHaveBeenCalledWith(olderPath, expect.anything());
     expect(row.compile_status).toBe("success");
     expect(row.pdf_artifact_path).toBe(newerPath);
     expect(row.last_compile_request_id).toBe(

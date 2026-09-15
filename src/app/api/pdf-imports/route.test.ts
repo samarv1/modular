@@ -3,8 +3,8 @@ import { SharedKeyCapExceededError } from "@/lib/ai-usage";
 import { ownerScopedTable } from "@/lib/db";
 import { ResumeExtractionAuthError } from "@/lib/resume-extraction";
 
-// Same convention as src/app/api/imports/route.test.ts: hits the live
-// Supabase project, so TEST_OWNER_ID must be a real signed-in user's id.
+// Runs only through `npm run test:integration`. TEST_OWNER_ID must belong to
+// the dedicated Supabase test project configured through TEST_SUPABASE_*.
 const testOwnerId = process.env.TEST_OWNER_ID!;
 vi.mock("@/lib/owner", () => ({ getOwnerId: async () => testOwnerId }));
 
@@ -50,7 +50,6 @@ vi.mock("@/lib/ai-usage", async () => {
 // Defaults to "no BYOK key configured"; individual BYOK tests override with
 // mockResolvedValueOnce.
 vi.mock("@/lib/byok-store", () => ({
-  hasByokKey: vi.fn().mockResolvedValue(false),
   getByokKey: vi.fn().mockResolvedValue(null),
 }));
 
@@ -58,7 +57,7 @@ const { POST } = await import("./route");
 const { extractResumeStructure } = await import("@/lib/resume-extraction");
 const { reserveSharedKeyUsage, releaseSharedKeyUsage } =
   await import("@/lib/ai-usage");
-const { getByokKey, hasByokKey } = await import("@/lib/byok-store");
+const { getByokKey } = await import("@/lib/byok-store");
 
 function previewRequest() {
   const form = new FormData();
@@ -93,7 +92,10 @@ describe("POST /api/pdf-imports (preview): shared-key cap and BYOK", () => {
     vi.mocked(releaseSharedKeyUsage).mockClear();
     const res = await POST(previewRequest());
     expect(res.status).toBe(200);
-    expect(reserveSharedKeyUsage).toHaveBeenCalledWith(testOwnerId);
+    expect(reserveSharedKeyUsage).toHaveBeenCalledWith(
+      testOwnerId,
+      expect.anything(),
+    );
     expect(releaseSharedKeyUsage).not.toHaveBeenCalled();
   });
 
@@ -112,7 +114,6 @@ describe("POST /api/pdf-imports (preview): shared-key cap and BYOK", () => {
   it("skips the cap check entirely when the caller has a stored BYOK key", async () => {
     vi.mocked(reserveSharedKeyUsage).mockClear();
     vi.mocked(releaseSharedKeyUsage).mockClear();
-    vi.mocked(hasByokKey).mockResolvedValueOnce(true);
     vi.mocked(getByokKey).mockResolvedValueOnce("sk-test-key");
     const res = await POST(previewRequest());
     expect(res.status).toBe(200);
@@ -123,7 +124,6 @@ describe("POST /api/pdf-imports (preview): shared-key cap and BYOK", () => {
   it("surfaces byok_key_rejected and does not fall back to the shared key", async () => {
     vi.mocked(reserveSharedKeyUsage).mockClear();
     vi.mocked(releaseSharedKeyUsage).mockClear();
-    vi.mocked(hasByokKey).mockResolvedValueOnce(true);
     vi.mocked(getByokKey).mockResolvedValueOnce("sk-bad-key");
     vi.mocked(extractResumeStructure).mockRejectedValueOnce(
       new ResumeExtractionAuthError("mock: key rejected"),

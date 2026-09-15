@@ -1,30 +1,30 @@
 import { NextResponse } from "next/server";
-import { asRows, ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
-import { throwDbError } from "@/lib/api-request";
+import { asRows } from "@/lib/db";
+import { isUuid, throwDbError } from "@/lib/api-request";
 import type { BankEntryRow } from "@/lib/rows";
+import { getOwnerContext } from "@/lib/request-context";
 
-// ?sourceResumeId= scopes to one upload's entries — used by the import
-// review modal's "edit an already-imported resume" mode (see
-// import-review-modal.tsx) so it can show exactly what that upload
-// contributed, not the whole bank.
 export async function GET(request: Request) {
   const sourceResumeId = new URL(request.url).searchParams.get(
     "sourceResumeId",
   );
-  const ownerId = await getOwnerId();
+  if (sourceResumeId && !isUuid(sourceResumeId)) {
+    return NextResponse.json(
+      { error: "invalid source resume id" },
+      { status: 400 },
+    );
+  }
+  const context = await getOwnerContext();
 
-  let query = ownerScopedTable("bank_entry", ownerId).select(
-    "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
-  );
+  let query = context
+    .table("bank_entry")
+    .select(
+      "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
+    );
   if (sourceResumeId) query = query.eq("source_resume_id", sourceResumeId);
 
   const { data, error } = asRows<BankEntryRow>(
-    await query
-      // created_at only, not source_section, so entries come back in
-      // upload/original-resume order for the bank pane's section grouping,
-      // not alphabetical.
-      .order("created_at", { ascending: true }),
+    await query.order("created_at", { ascending: true }),
   );
   if (error) throwDbError(error);
 

@@ -1,30 +1,23 @@
 import { NextResponse } from "next/server";
-import { ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
-import { throwDbError } from "@/lib/api-request";
 import { detectAdapter } from "@/lib/adapters/registry";
 import { ArchiveRejectedError, parseLatexArchive } from "@/lib/latex-archive";
 import { MAX_ARCHIVE_BYTES } from "@/lib/archive-limits";
 import {
-  extractResumeStructure,
   ResumeExtractionAuthError,
   ResumeExtractionError,
-  type ByokConfig,
 } from "@/lib/resume-extraction";
 import { synthesizeJakeArchive } from "@/lib/synthesize-jake-archive";
 import {
   applyOverrides,
   commitImport,
+  loadNormalizedLatexSet,
   normalizeLatex,
   parseOverrides,
 } from "@/lib/import-commit";
 import { flattenEntries } from "@/lib/flatten-entries";
-import {
-  reserveSharedKeyUsage,
-  releaseSharedKeyUsage,
-  SharedKeyCapExceededError,
-} from "@/lib/ai-usage";
-import { getByokKey, hasByokKey } from "@/lib/byok-store";
+import { SharedKeyCapExceededError } from "@/lib/ai-usage";
+import { extractResumeForOwner } from "@/lib/extract-for-owner";
+import { getOwnerContext } from "@/lib/request-context";
 
 export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
@@ -45,7 +38,19 @@ export async function POST(request: Request) {
     );
   }
   const mode = form.get("mode") === "preview" ? "preview" : "commit";
-  const ownerId = await getOwnerId();
+  let overrides: ReturnType<typeof parseOverrides> = [];
+  if (mode === "commit") {
+    try {
+      overrides = parseOverrides(form.get("overrides"));
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "invalid overrides" },
+        { status: 400 },
+      );
+    }
+  }
+  const context = await getOwnerContext();
+  const { ownerId } = context;
 
   let zipBytes: Uint8Array<ArrayBufferLike> = new Uint8Array(
     await file.arrayBuffer(),
@@ -69,23 +74,17 @@ export async function POST(request: Request) {
     source: archive.source,
   });
 
-  // Set when this request converts a non-Jake archive via AI, so the preview
-  // response can hand the converted zip back to the client, which re-uploads
-  // it verbatim for the commit request, so detectAdapter succeeds
-  // immediately there and tryConvertViaAi (and its Gemini call) never runs
-  // twice for the same import.
+  // Reuse converted preview bytes during commit to avoid a second AI call.
   let convertedZipBytes: Uint8Array<ArrayBufferLike> | null = null;
 
   if (!adapter || !result.compatible) {
-    // Not Jake's template: try converting via AI instead of rejecting outright.
-    // Raw LaTeX -> structured JSON -> re-synthesized Jake's-template LaTeX,
-    // then re-run through the same detection so a successful conversion
-    // falls through the normal path below indistinguishably from a native
-    // Jake upload. If the AI can't make sense of it either, fall back to the
-    // original mismatch report.
     let converted;
     try {
-      converted = await tryConvertViaAi(archive.source, ownerId);
+      converted = await tryConvertViaAi(
+        archive.source,
+        ownerId,
+        context.client,
+      );
     } catch (err) {
       if (err instanceof SharedKeyCapExceededError) {
         return NextResponse.json(
@@ -130,23 +129,14 @@ export async function POST(request: Request) {
   }
 
   if (mode === "preview") {
-    // Pure parse/extract — no storage upload, no DB writes, so there's
-    // nothing to clean up if the user cancels the review modal. Duplicate
-    // flags are informational only (dedup itself still runs at commit time).
-    const { data: existingLatex, error: existingLatexError } =
-      await ownerScopedTable("bank_entry", ownerId).select("raw_latex");
-    if (existingLatexError) throwDbError(existingLatexError);
-    const existingNormalized = new Set(
-      ((existingLatex ?? []) as unknown as { raw_latex: string }[]).map((row) =>
-        normalizeLatex(row.raw_latex),
-      ),
+    // Preview is read-only. Duplicate checks run again during commit.
+    const existingNormalized = await loadNormalizedLatexSet(
+      ownerId,
+      context.client,
     );
 
     return NextResponse.json({
       compatible: true,
-      // Present only when this preview converted a non-Jake archive via AI:
-      // the client re-uploads these bytes for the commit request instead of
-      // the original file, so the archive doesn't need re-converting.
       convertedArchive: convertedZipBytes
         ? Buffer.from(convertedZipBytes).toString("base64")
         : undefined,
@@ -161,7 +151,6 @@ export async function POST(request: Request) {
     });
   }
 
-  const overrides = parseOverrides(form.get("overrides"));
   let finalEntries;
   try {
     finalEntries = applyOverrides(flatEntries, overrides);
@@ -193,29 +182,25 @@ export async function POST(request: Request) {
     forceIncludeIndices,
     desiredDisplayName:
       file.name.replace(/\.zip$/i, "").trim() || "Imported resume",
+    client: context.client,
   });
 
   return NextResponse.json(commitResult);
 }
 
-async function tryConvertViaAi(latexSource: string, ownerId: string) {
-  const byok: ByokConfig | undefined = (await hasByokKey(ownerId))
-    ? { apiKey: (await getByokKey(ownerId))! }
-    : undefined;
-  if (!byok) await reserveSharedKeyUsage(ownerId);
-
+async function tryConvertViaAi(
+  latexSource: string,
+  ownerId: string,
+  client: import("@/lib/db").ServiceClient,
+) {
   let extraction;
   try {
-    extraction = await extractResumeStructure(latexSource, byok);
+    extraction = await extractResumeForOwner(latexSource, ownerId, client);
   } catch (err) {
-    if (!byok) await releaseSharedKeyUsage(ownerId);
     if (err instanceof ResumeExtractionError) return null;
     throw err;
   }
 
-  // Backstop, not expected to fail: the canonical preamble always satisfies
-  // the contract, so this only trips if the serializer produced something
-  // structurally broken.
   let zipBytes, archive, adapter, result;
   try {
     ({ zipBytes, archive, adapter, result } =

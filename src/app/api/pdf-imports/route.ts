@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import { getOwnerId } from "@/lib/owner";
 import {
   convertPdfToMarkdown,
   PdfToMarkdownError,
 } from "@/lib/pdf-to-markdown";
 import {
-  extractResumeStructure,
   ResumeExtractionAuthError,
   ResumeExtractionError,
 } from "@/lib/resume-extraction";
@@ -14,23 +12,14 @@ import { synthesizeJakeArchive } from "@/lib/synthesize-jake-archive";
 import { ArchiveRejectedError } from "@/lib/latex-archive";
 import { commitImport } from "@/lib/import-commit";
 import { flattenEntries } from "@/lib/flatten-entries";
-import {
-  reserveSharedKeyUsage,
-  releaseSharedKeyUsage,
-  SharedKeyCapExceededError,
-} from "@/lib/ai-usage";
-import { getByokKey, hasByokKey } from "@/lib/byok-store";
+import { SharedKeyCapExceededError } from "@/lib/ai-usage";
+import { extractResumeForOwner } from "@/lib/extract-for-owner";
+import { validateExtractionRequiredFields } from "@/lib/entry-materialization";
+import { getOwnerContext } from "@/lib/request-context";
 
 const MAX_PDF_BYTES = 25 * 1024 * 1024;
 
-// mode=preview: PDF -> markdown -> LLM-structured JSON, for the review modal.
-// Nothing is persisted, mirroring mode=preview in /api/imports.
-//
-// mode=commit: the user's *edited* structured JSON -> deterministic LaTeX ->
-// zipped in memory -> the exact same parseLatexArchive/detectAdapter/extract
-// path a real .tex upload goes through, then the shared commitImport helper
-// (src/lib/import-commit.ts). This is what guarantees a PDF-derived
-// bank_entry is byte-for-byte indistinguishable from a real Jake upload's.
+// Commit routes PDF extraction through the same archive pipeline as ZIP input.
 export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
   if (!form) {
@@ -40,7 +29,6 @@ export async function POST(request: Request) {
     );
   }
   const mode = form.get("mode") === "commit" ? "commit" : "preview";
-  const ownerId = await getOwnerId();
 
   if (mode === "preview") {
     const file = form.get("file");
@@ -53,10 +41,8 @@ export async function POST(request: Request) {
         { status: 413 },
       );
     }
-
-    const byok = (await hasByokKey(ownerId))
-      ? { apiKey: (await getByokKey(ownerId))! }
-      : undefined;
+    const context = await getOwnerContext();
+    const { ownerId } = context;
 
     const pdfBytes = new Uint8Array(await file.arrayBuffer());
 
@@ -73,29 +59,23 @@ export async function POST(request: Request) {
       throw err;
     }
 
-    if (!byok) {
-      try {
-        await reserveSharedKeyUsage(ownerId);
-      } catch (err) {
-        if (err instanceof SharedKeyCapExceededError) {
-          return NextResponse.json(
-            {
-              error:
-                "you've used your shared AI extraction quota for this month",
-              code: "shared_key_cap_reached",
-            },
-            { status: 429 },
-          );
-        }
-        throw err;
-      }
-    }
-
     let extraction;
     try {
-      extraction = await extractResumeStructure(markdown, byok);
+      extraction = await extractResumeForOwner(
+        markdown,
+        ownerId,
+        context.client,
+      );
     } catch (err) {
-      if (!byok) await releaseSharedKeyUsage(ownerId);
+      if (err instanceof SharedKeyCapExceededError) {
+        return NextResponse.json(
+          {
+            error: "you've used your shared AI extraction quota for this month",
+            code: "shared_key_cap_reached",
+          },
+          { status: 429 },
+        );
+      }
       if (err instanceof ResumeExtractionAuthError) {
         return NextResponse.json(
           { error: err.message, code: "byok_key_rejected" },
@@ -139,22 +119,8 @@ export async function POST(request: Request) {
   }
   const extraction = parsed.data;
 
-  // The schema leaves per-kind fields optional (see resume-extraction-schema.ts
-  // for why), so an entry missing what its kind actually needs has to be
-  // caught here — otherwise it'd synthesize as e.g. `\resumeSubheading{}{}{}{}`
-  // and silently persist a bank_entry with an empty display name.
-  const invalidEntries = extraction.sections.flatMap((section) =>
-    section.entries
-      .filter((entry) => {
-        if (entry.kind === "section_chunk")
-          return !entry.items || entry.items.length === 0;
-        return !entry.title;
-      })
-      .map(
-        (entry) =>
-          `"${section.title}" entry missing ${entry.kind === "section_chunk" ? "items" : "a title"}`,
-      ),
-  );
+  // The shared schema permits fields that are optional for other entry kinds.
+  const invalidEntries = validateExtractionRequiredFields(extraction);
   if (invalidEntries.length > 0) {
     return NextResponse.json(
       {
@@ -164,10 +130,9 @@ export async function POST(request: Request) {
       { status: 422 },
     );
   }
+  const context = await getOwnerContext();
+  const { ownerId } = context;
 
-  // Backstop, not expected to fail: the canonical preamble always satisfies
-  // the contract, so this only trips if the serializer produced something
-  // structurally broken (e.g. an unbalanced brace from a bad escape).
   let converted;
   try {
     converted = await synthesizeJakeArchive(extraction);
@@ -223,6 +188,7 @@ export async function POST(request: Request) {
     finalEntries: flatEntries,
     forceIncludeIndices: new Set<number>(),
     desiredDisplayName,
+    client: context.client,
   });
 
   return NextResponse.json(commitResult);
