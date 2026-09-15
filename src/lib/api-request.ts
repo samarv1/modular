@@ -14,23 +14,21 @@ export async function readJsonObject(
 }
 
 export function mutationErrorStatus(error: { code?: string }): number {
-  if (error.code === "PGRST116") return 404;
-  if (error.code === "23503") return 422;
+  if (error.code === "PGRST116" || error.code === "P0002") return 404;
+  if (error.code === "23503" || error.code === "P0001") return 422;
   if (error.code === "22P02") return 400;
   return 500;
 }
 
-// The three codes above map to expected, client-meaningful failures (not
-// found, FK-restricted, bad input) whose Postgres message is safe and
-// useful to return as-is. Anything else is an unexpected DB error whose raw
-// message can include column/constraint names — log it and show the client
-// a generic message instead.
+// Only expected database errors may expose their messages to clients.
 export function mutationErrorMessage(error: {
   code?: string;
   message: string;
 }): string {
   if (
     error.code === "PGRST116" ||
+    error.code === "P0002" ||
+    error.code === "P0001" ||
     error.code === "23503" ||
     error.code === "22P02"
   ) {
@@ -40,10 +38,7 @@ export function mutationErrorMessage(error: {
   return "something went wrong";
 }
 
-// Used for DB errors from a mutation with no meaningful client-facing
-// recovery path (an unexpected write failure, not a validation issue) — the
-// route lets this bubble up to Next's default 500 handler, which doesn't log
-// it anywhere on its own, so log it here first.
+// Next does not log these mutation failures before returning its default 500.
 export function throwDbError(error: { message: string; code?: string }): never {
   console.error("unexpected db error:", error.code, error.message);
   throw new Error(error.message);

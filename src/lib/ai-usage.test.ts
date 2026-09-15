@@ -15,8 +15,8 @@ import {
   SharedKeyCapExceededError,
 } from "@/lib/ai-usage";
 
-// Hits the live Supabase project (same convention as src/app/api/imports/
-// route.test.ts): TEST_OWNER_ID must be a real signed-in user's id.
+// Runs only through `npm run test:integration`. TEST_OWNER_ID must belong to
+// the dedicated Supabase test project configured through TEST_SUPABASE_*.
 const testOwnerId = process.env.TEST_OWNER_ID!;
 const client = createServiceClient();
 

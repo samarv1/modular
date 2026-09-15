@@ -6,9 +6,9 @@ import {
   saveByokKey,
 } from "@/lib/byok-store";
 
-// Hits the live Supabase project (same convention as src/lib/ai-usage.test.ts):
-// TEST_OWNER_ID must be a real signed-in user's id. Vault-backed, so this
-// can't be mocked away, since it's the real round-trip through pgsodium.
+// Runs only through `npm run test:integration`. TEST_OWNER_ID must belong to
+// the dedicated Supabase test project configured through TEST_SUPABASE_*.
+// This is Vault-backed, so it verifies the real round-trip through pgsodium.
 //
 // There's no fabricated-period column to isolate onto here like ai-usage.test.ts
 // uses, so instead capture whatever key TEST_OWNER_ID had before this file ran

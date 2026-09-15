@@ -1,6 +1,7 @@
-import { asRow, asRows, ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
+import { asRow, asRows } from "@/lib/db";
+import { groupBySectionId } from "@/lib/group-by-section";
 import { isUuid } from "@/lib/api-request";
+import { getOwnerContext, type OwnerContext } from "@/lib/request-context";
 
 export interface ResumeMetaRow {
   id: string;
@@ -20,19 +21,17 @@ export interface ResumeSectionRow {
   entries: { id: string; bankEntryId: string; position: number }[];
 }
 
-// Shared by GET /api/resumes/:id and page.tsx's initial server-rendered
-// load, so the two don't drift on what "a resume's composition" means.
 export async function loadResumeComposition(
   resumeId: string,
+  providedContext?: OwnerContext,
 ): Promise<{ resume: ResumeMetaRow; sections: ResumeSectionRow[] } | null> {
-  // A malformed id (not even UUID-shaped) should 404 like any other
-  // nonexistent resume, not surface Postgres's "invalid input syntax for
-  // type uuid" as a raw 500 — /resume/[id] can be hit with any route param.
+  // Route parameters must not reach Postgres as malformed UUIDs.
   if (!isUuid(resumeId)) return null;
-  const ownerId = await getOwnerId();
+  const context = providedContext ?? (await getOwnerContext());
 
   const { data: resume, error: resumeError } = asRow<ResumeMetaRow>(
-    await ownerScopedTable("resume", ownerId)
+    await context
+      .table("resume")
       .select(
         "id, title, template_shell_id, compile_status, compile_error, pdf_artifact_path, page_count, updated_at",
       )
@@ -42,42 +41,43 @@ export async function loadResumeComposition(
   if (resumeError) throw new Error(resumeError.message);
   if (!resume) return null;
 
+  const [sectionsResult, entriesResult] = await Promise.all([
+    context
+      .table("resume_section")
+      .select("id, title, position")
+      .eq("resume_id", resumeId)
+      .order("position", { ascending: true }),
+    context
+      .table("resume_section_entry")
+      .select("id, resume_section_id, bank_entry_id, position")
+      .eq("resume_id", resumeId)
+      .order("position", { ascending: true }),
+  ]);
   const { data: sections, error: sectionsError } = asRows<{
     id: string;
     title: string;
     position: number;
-  }>(
-    await ownerScopedTable("resume_section", ownerId)
-      .select("id, title, position")
-      .eq("resume_id", resumeId)
-      .order("position", { ascending: true }),
-  );
+  }>(sectionsResult);
   if (sectionsError) throw new Error(sectionsError.message);
-
   const { data: entries, error: entriesError } = asRows<{
     id: string;
     resume_section_id: string;
     bank_entry_id: string;
     position: number;
-  }>(
-    await ownerScopedTable("resume_section_entry", ownerId)
-      .select("id, resume_section_id, bank_entry_id, position")
-      .eq("resume_id", resumeId)
-      .order("position", { ascending: true }),
-  );
+  }>(entriesResult);
   if (entriesError) throw new Error(entriesError.message);
+
+  const entriesBySection = groupBySectionId(entries ?? []);
 
   const sectionRows: ResumeSectionRow[] = (sections ?? []).map((section) => ({
     id: section.id,
     title: section.title,
     position: section.position,
-    entries: (entries ?? [])
-      .filter((e) => e.resume_section_id === section.id)
-      .map((e) => ({
-        id: e.id,
-        bankEntryId: e.bank_entry_id,
-        position: e.position,
-      })),
+    entries: (entriesBySection.get(section.id) ?? []).map((e) => ({
+      id: e.id,
+      bankEntryId: e.bank_entry_id,
+      position: e.position,
+    })),
   }));
 
   return { resume, sections: sectionRows };

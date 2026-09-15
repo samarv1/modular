@@ -1,17 +1,14 @@
 import { createServiceClient } from "@/lib/supabase/server";
+import type { ServiceClient } from "@/lib/db";
 
-// Thin interface over Supabase Storage (see PLAN.md "Key decisions" — archive
-// storage). Every call site should go through this, not a bare
-// supabase.storage.from(...) call, so swapping to raw S3 later — if volume
-// ever justifies the cost difference — is a change to this file alone.
 const BUCKET = "resume-archives";
 
 export async function uploadArchive(
   path: string,
   bytes: Uint8Array,
   contentType: string,
+  client: ServiceClient = createServiceClient(),
 ) {
-  const client = createServiceClient();
   const { error } = await client.storage.from(BUCKET).upload(path, bytes, {
     contentType,
     upsert: false,
@@ -24,28 +21,32 @@ export async function getSignedUrl(
   path: string,
   expiresInSeconds = 3600,
   options?: { download?: boolean | string },
+  client: ServiceClient = createServiceClient(),
 ) {
-  const client = createServiceClient();
   const { data, error } = await client.storage
     .from(BUCKET)
     .createSignedUrl(
       path,
       expiresInSeconds,
-      options?.download ? { download: true } : undefined,
+      options?.download ? { download: options.download } : undefined,
     );
   if (error) throw error;
   return data.signedUrl;
 }
 
-export async function downloadArchive(path: string): Promise<Uint8Array> {
-  const client = createServiceClient();
+export async function downloadArchive(
+  path: string,
+  client: ServiceClient = createServiceClient(),
+): Promise<Uint8Array> {
   const { data, error } = await client.storage.from(BUCKET).download(path);
   if (error) throw error;
   return new Uint8Array(await data.arrayBuffer());
 }
 
-export async function deleteArchive(path: string) {
-  const client = createServiceClient();
+export async function deleteArchive(
+  path: string,
+  client: ServiceClient = createServiceClient(),
+) {
   const { error } = await client.storage.from(BUCKET).remove([path]);
   if (error) throw error;
 }

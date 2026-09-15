@@ -1,21 +1,14 @@
 import { randomUUID } from "crypto";
-import { asRow, asRows, ownerScopedTable } from "@/lib/db";
+import { asRow, asRows, ownerScopedTable, type ServiceClient } from "@/lib/db";
 import { dedupedName } from "@/lib/unique-db-name";
 import { uploadArchive, deleteArchive } from "@/lib/storage";
-import type { ExtractedResume } from "@/lib/adapters/types";
-import { renderEntry, renderHeader } from "@/lib/synthesize-jake-latex";
-import {
-  ExtractedEntrySchema,
-  HeaderDataSchema,
-} from "@/lib/resume-extraction-schema";
-import { entryDisplayName } from "@/lib/entry-display-name";
+import { z } from "zod";
+import { materializeStructuredFields } from "@/lib/entry-materialization";
+import type { BankEntryKind, ExtractedResume } from "@/lib/adapters/types";
 import type { FlatEntry } from "@/lib/flatten-entries";
 
-// Shared by both import entry points (POST /api/imports for real .zip
-// uploads, POST /api/pdf-imports for synthesized-from-PDF ones): everything
-// downstream of "we have a compatible ExtractedResume and the zip bytes it
-// came from" is identical — same template_shell fingerprint reuse, same
-// exact-duplicate bank_entry detection, same failure cleanup.
+export { flattenEntries } from "@/lib/flatten-entries";
+export type { FlatEntry } from "@/lib/flatten-entries";
 
 // Exact-duplicate matching should ignore incidental whitespace differences
 // (trailing spaces, blank lines) without doing any semantic comparison.
@@ -23,50 +16,79 @@ export function normalizeLatex(raw: string): string {
   return raw.trim().replace(/\s+/g, " ");
 }
 
+export async function loadNormalizedLatexSet(
+  ownerId: string,
+  client?: ServiceClient,
+): Promise<Set<string>> {
+  const { data, error } = await ownerScopedTable(
+    "bank_entry",
+    ownerId,
+    client,
+  ).select("raw_latex");
+  if (error) throw new Error(error.message);
+  return new Set(
+    ((data ?? []) as unknown as { raw_latex: string }[]).map((row) =>
+      normalizeLatex(row.raw_latex),
+    ),
+  );
+}
 export type EntryOverride = {
   index: number;
   displayName?: string;
   excluded?: boolean;
-  // The review modal auto-excludes entries flagged isDuplicate in preview
-  // (see mode=preview's existingNormalized check); this says the user
-  // explicitly opted back in, so the exact-duplicate filter further down
-  // must not silently drop it again.
+  // Explicit inclusion overrides the server's exact-duplicate filter.
   includeDuplicate?: boolean;
-  // Structured field edits for a touched entry, keyed by kind (mirrors
-  // PATCH /api/entries/:id's entry/header mutual exclusivity). Validated
-  // against ExtractedEntrySchema/HeaderDataSchema in applyOverrides, so an
-  // entry the user never touched in the review UI has neither set, and
-  // keeps its original byte-for-byte rawLatex.
   entryFields?: unknown;
   headerFields?: unknown;
 };
 
+const EntryOverrideSchema = z
+  .object({
+    index: z.number().int().nonnegative(),
+    displayName: z.string().optional(),
+    excluded: z.boolean().optional(),
+    includeDuplicate: z.boolean().optional(),
+    entryFields: z.unknown().optional(),
+    headerFields: z.unknown().optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.entryFields === undefined || value.headerFields === undefined,
+    { message: "entryFields and headerFields are mutually exclusive" },
+  );
+
+const EntryOverridesSchema = z
+  .array(EntryOverrideSchema)
+  .superRefine((overrides, context) => {
+    const indices = new Set<number>();
+    for (const override of overrides) {
+      if (indices.has(override.index)) {
+        context.addIssue({
+          code: "custom",
+          message: `duplicate override index ${override.index}`,
+        });
+      }
+      indices.add(override.index);
+    }
+  });
+
 export function parseOverrides(raw: unknown): EntryOverride[] {
+  if (raw === null || raw === undefined || raw === "") return [];
   let parsed: unknown = raw;
   if (typeof raw === "string") {
     try {
       parsed = JSON.parse(raw);
     } catch {
-      return [];
+      throw new Error("overrides are not valid JSON");
     }
   }
-  if (!Array.isArray(parsed)) return [];
-  return parsed.filter(
-    (o): o is EntryOverride =>
-      typeof o === "object" &&
-      o !== null &&
-      typeof (o as EntryOverride).index === "number",
-  );
+  const result = EntryOverridesSchema.safeParse(parsed);
+  if (!result.success) throw new Error("invalid overrides");
+  return result.data;
 }
 
-// Regenerates a touched entry's rawLatex from user-edited structured fields
-// (same renderEntry/renderHeader path PATCH /api/entries/:id uses for an
-// existing bank entry), server-side, so the client never has to be trusted
-// with raw LaTeX text directly. Throws on an invalid or incomplete
-// entryFields/headerFields payload (same required-fields check as
-// /api/pdf-imports's commit path, since this now accepts the same
-// structured shape from the same editor) so the caller fails the whole
-// commit instead of silently keeping the entry's stale, pre-edit rawLatex.
+// Touched entries are rematerialized server-side so clients never supply raw LaTeX.
 export function applyOverrides(
   entries: FlatEntry[],
   overrides: EntryOverride[],
@@ -82,40 +104,19 @@ export function applyOverrides(
     let sourceOffsetStart = entry.sourceOffsetStart;
     let sourceOffsetEnd = entry.sourceOffsetEnd;
 
-    if (override?.entryFields !== undefined) {
-      const parsed = ExtractedEntrySchema.safeParse(override.entryFields);
-      if (!parsed.success)
-        throw new Error(`invalid fields for entry ${entry.index}`);
-      // ExtractedEntrySchema leaves title/items optional (see
-      // resume-extraction-schema.ts), so an edit that clears the one field
-      // its kind actually needs has to be caught here too, same as
-      // /api/pdf-imports's commit path, otherwise it'd silently synthesize
-      // e.g. `\resumeSubheading{}{}{}{}` with an empty display name.
-      const missingRequired =
-        parsed.data.kind === "section_chunk"
-          ? !parsed.data.items || parsed.data.items.length === 0
-          : !parsed.data.title;
-      if (missingRequired) {
-        throw new Error(
-          `"${parsed.data.sourceSection}" entry missing ${parsed.data.kind === "section_chunk" ? "items" : "a title"}`,
-        );
+    if (override) {
+      const materialized = materializeStructuredFields({
+        entry: override.entryFields,
+        header: override.headerFields,
+        currentDisplayName: displayName,
+        expectedKind: entry.kind as BankEntryKind,
+      });
+      if (materialized) {
+        rawLatex = materialized.rawLatex;
+        displayName = materialized.displayName;
+        sourceOffsetStart = materialized.sourceOffsetStart;
+        sourceOffsetEnd = materialized.sourceOffsetEnd;
       }
-      rawLatex = renderEntry(parsed.data);
-      displayName = entryDisplayName(
-        parsed.data.kind,
-        parsed.data.title,
-        parsed.data.organization,
-        parsed.data.sourceSection,
-      );
-      sourceOffsetStart = null;
-      sourceOffsetEnd = null;
-    } else if (override?.headerFields !== undefined) {
-      const parsed = HeaderDataSchema.safeParse(override.headerFields);
-      if (!parsed.success)
-        throw new Error(`invalid header fields for entry ${entry.index}`);
-      rawLatex = renderHeader(parsed.data);
-      sourceOffsetStart = null;
-      sourceOffsetEnd = null;
     }
 
     result.push({
@@ -137,21 +138,23 @@ async function cleanupFailedImport({
   archivePath,
   sourceResumeId,
   createdShellId,
+  client,
 }: {
   ownerId: string;
   archivePath: string;
   sourceResumeId?: string;
   createdShellId?: string;
+  client?: ServiceClient;
 }) {
   if (sourceResumeId) {
-    await ownerScopedTable("bank_entry", ownerId)
+    await ownerScopedTable("bank_entry", ownerId, client)
       .delete()
       .eq("source_resume_id", sourceResumeId)
       .then(
         () => undefined,
         () => undefined,
       );
-    await ownerScopedTable("source_resume", ownerId)
+    await ownerScopedTable("source_resume", ownerId, client)
       .delete()
       .eq("id", sourceResumeId)
       .then(
@@ -160,7 +163,7 @@ async function cleanupFailedImport({
       );
   }
   if (createdShellId) {
-    await ownerScopedTable("template_shell", ownerId)
+    await ownerScopedTable("template_shell", ownerId, client)
       .delete()
       .eq("id", createdShellId)
       .then(
@@ -168,7 +171,26 @@ async function cleanupFailedImport({
         () => undefined,
       );
   }
-  await deleteArchive(archivePath).catch(() => undefined);
+  const [shellReference, sourceReference] = await Promise.all([
+    ownerScopedTable("template_shell", ownerId, client)
+      .select("id")
+      .eq("archive_path", archivePath)
+      .limit(1)
+      .maybeSingle(),
+    ownerScopedTable("source_resume", ownerId, client)
+      .select("id")
+      .eq("archive_path", archivePath)
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  if (
+    !shellReference.error &&
+    !sourceReference.error &&
+    !shellReference.data &&
+    !sourceReference.data
+  ) {
+    await deleteArchive(archivePath, client).catch(() => undefined);
+  }
 }
 
 export interface CommitImportParams {
@@ -181,8 +203,8 @@ export interface CommitImportParams {
   extracted: ExtractedResume;
   finalEntries: FlatEntry[];
   forceIncludeIndices: Set<number>;
-  /** Filename (no extension) used as the default source_resume display name. */
   desiredDisplayName: string;
+  client?: ServiceClient;
 }
 
 export async function commitImport({
@@ -196,6 +218,7 @@ export async function commitImport({
   finalEntries,
   forceIncludeIndices,
   desiredDisplayName,
+  client,
 }: CommitImportParams) {
   const entryRows = finalEntries.map((entry) => ({
     source_resume_id: "",
@@ -210,13 +233,12 @@ export async function commitImport({
   }));
 
   const archivePath = `${ownerId}/${randomUUID()}.zip`;
-  await uploadArchive(archivePath, archiveBytes, "application/zip");
+  await uploadArchive(archivePath, archiveBytes, "application/zip", client);
 
   const partial: { sourceResumeId?: string; createdShellId?: string } = {};
   try {
-    // First compatible upload for this fingerprint establishes the shell;
-    // later ones reuse it (see PLAN.md: "first upload becomes the template shell").
-    const shells = ownerScopedTable("template_shell", ownerId);
+    // A fingerprint identifies one reusable shell for an owner and adapter.
+    const shells = ownerScopedTable("template_shell", ownerId, client);
     const { data: existingShell, error: shellLookupError } = asRow<{
       id: string;
     }>(
@@ -243,9 +265,24 @@ export async function commitImport({
           .select("id")
           .single(),
       );
-      if (insertShellError) throw new Error(insertShellError.message);
-      templateShellId = newShell!.id;
-      partial.createdShellId = templateShellId;
+      if (insertShellError?.code === "23505") {
+        const { data: concurrentShell, error: concurrentShellError } = asRow<{
+          id: string;
+        }>(
+          await shells
+            .select("id")
+            .eq("adapter_id", adapterId)
+            .eq("fingerprint", fingerprint)
+            .limit(1)
+            .single(),
+        );
+        if (concurrentShellError) throw new Error(concurrentShellError.message);
+        templateShellId = concurrentShell!.id;
+      } else {
+        if (insertShellError) throw new Error(insertShellError.message);
+        templateShellId = newShell!.id;
+        partial.createdShellId = templateShellId;
+      }
     }
 
     const displayName = await dedupedName(
@@ -255,13 +292,14 @@ export async function commitImport({
       {
         excludeNulls: true,
         ownerId,
+        client,
       },
     );
 
     const { data: sourceResume, error: sourceResumeError } = asRow<{
       id: string;
     }>(
-      await ownerScopedTable("source_resume", ownerId)
+      await ownerScopedTable("source_resume", ownerId, client)
         .insert({
           template_shell_id: templateShellId,
           archive_path: archivePath,
@@ -277,17 +315,8 @@ export async function commitImport({
     for (const entryRow of entryRows)
       entryRow.source_resume_id = sourceResumeId;
 
-    // Exact-duplicate detection: an entry is a duplicate if its raw_latex
-    // (normalized) matches one already in this owner's bank, or another
-    // entry earlier in this same upload batch.
-    const { data: existingLatex, error: existingLatexError } =
-      await ownerScopedTable("bank_entry", ownerId).select("raw_latex");
-    if (existingLatexError) throw new Error(existingLatexError.message);
-    const seen = new Set(
-      ((existingLatex ?? []) as unknown as { raw_latex: string }[]).map((row) =>
-        normalizeLatex(row.raw_latex),
-      ),
-    );
+    // Include earlier batch entries so one import cannot create duplicates.
+    const seen = await loadNormalizedLatexSet(ownerId, client);
     const dedupedEntryRows = entryRows.filter((entryRow, i) => {
       const normalized = normalizeLatex(entryRow.raw_latex as string);
       if (forceIncludeIndices.has(finalEntries[i].index)) {
@@ -299,8 +328,6 @@ export async function commitImport({
       return true;
     });
 
-    // Same column set as GET /api/entries, so the client can prepend these
-    // straight into its BankEntryRow[] state without a refetch.
     const { data: insertedEntries, error: entriesError } = asRows<{
       id: string;
       kind: string;
@@ -315,7 +342,7 @@ export async function commitImport({
     }>(
       dedupedEntryRows.length === 0
         ? { data: [], error: null }
-        : await ownerScopedTable("bank_entry", ownerId)
+        : await ownerScopedTable("bank_entry", ownerId, client)
             .insert(dedupedEntryRows)
             .select(
               "id, kind, source_section, display_name, raw_latex, tags, required_packages, source_resume_id, source_resume(display_name), created_at",
@@ -335,7 +362,7 @@ export async function commitImport({
       })),
     };
   } catch (error) {
-    await cleanupFailedImport({ ownerId, archivePath, ...partial });
+    await cleanupFailedImport({ ownerId, archivePath, client, ...partial });
     throw error;
   }
 }

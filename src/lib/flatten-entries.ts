@@ -1,9 +1,6 @@
 import type { ExtractedResume } from "@/lib/adapters/types";
 
-// Flat, index-stable view of every extracted entry, in the same order
-// section-by-section that the DB insert eventually uses. `mode=preview` and
-// `mode=commit` both derive this from an identical parse/extract of the same
-// file, so an override's `index` addresses the same entry in either call.
+// Preview and commit share this ordering, so override indices stay stable.
 export type FlatEntry = {
   index: number;
   kind: string;

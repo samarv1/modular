@@ -1,25 +1,17 @@
 import { NextResponse } from "next/server";
-import { ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
 import { mutationErrorMessage, mutationErrorStatus } from "@/lib/api-request";
+import { getOwnerContext, type OwnerContext } from "@/lib/request-context";
 
-/**
- * Deletes a single owner-scoped row by id and turns the result into the
- * standard REST response used by every DELETE route in src/app/api: 204 on
- * success, 404 if nothing matched, or the mapped status from
- * mutationErrorStatus on a DB error. `describeError` can override the
- * message for a given status (e.g. a friendlier message for an FK-restricted
- * delete); it falls back to mutationErrorMessage's sanitized DB error
- * message.
- */
 export async function deleteOwnedRow(
   table: string,
   id: string,
   notFoundMessage: string,
   describeError?: (status: number, message: string) => string,
+  providedContext?: OwnerContext,
 ): Promise<NextResponse> {
-  const ownerId = await getOwnerId();
-  const { data, error } = await ownerScopedTable(table, ownerId)
+  const context = providedContext ?? (await getOwnerContext());
+  const { data, error } = await context
+    .table(table)
     .delete()
     .eq("id", id)
     .select("id")
