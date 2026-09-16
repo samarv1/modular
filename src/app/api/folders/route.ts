@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
 import { dedupedName } from "@/lib/unique-db-name";
 import { readJsonObject, throwDbError } from "@/lib/api-request";
 import { integerFieldError } from "@/lib/field-validation";
 import type { ResumeFolderRow } from "@/lib/rows";
+import { getOwnerContext } from "@/lib/request-context";
 
 export async function GET() {
-  const ownerId = await getOwnerId();
-  const { data, error } = await ownerScopedTable("resume_folder", ownerId)
+  const context = await getOwnerContext();
+  const { data, error } = await context
+    .table("resume_folder")
     .select("id, name, position_x, position_y, created_at")
     .order("created_at", { ascending: true });
   if (error) throwDbError(error as { message: string });
@@ -17,8 +17,6 @@ export async function GET() {
   });
 }
 
-// Like a fresh Finder folder — defaults to "Untitled Folder", immediately
-// renameable client-side rather than prompting for a name up front.
 export async function POST(request: Request) {
   const body = await readJsonObject(request);
   if (!body) {
@@ -36,10 +34,13 @@ export async function POST(request: Request) {
   const positionX = typeof body.positionX === "number" ? body.positionX : 0;
   const positionY = typeof body.positionY === "number" ? body.positionY : 0;
 
-  const name = await dedupedName("resume_folder", "name", desiredName);
-
-  const ownerId = await getOwnerId();
-  const { data, error } = await ownerScopedTable("resume_folder", ownerId)
+  const context = await getOwnerContext();
+  const name = await dedupedName("resume_folder", "name", desiredName, {
+    ownerId: context.ownerId,
+    client: context.client,
+  });
+  const { data, error } = await context
+    .table("resume_folder")
     .insert({ name, position_x: positionX, position_y: positionY })
     .select("id, name, position_x, position_y, created_at")
     .single();

@@ -1,18 +1,17 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getOwnerId } from "@/lib/owner";
+import { isUuid } from "@/lib/api-request";
+import type { ServiceClient } from "@/lib/db";
 
-// Shared by PATCH /api/resumes/:id/composition and POST /api/resumes
-// (duplicate). Every path that writes a resume's section/entry tree goes
-// through the set_resume_composition RPC (supabase/migrations/
-// 0002_composition_rpc.sql) so the write is one transaction, not a
-// delete-then-insert pair the API layer could interrupt.
+// All composition writes use the RPC so replacement stays transactional.
 
 export interface CompositionSectionInput {
   title: string;
   entries: string[]; // bank_entry ids, in display order
 }
 
-export type CompositionErrorCode = "not_found" | "duplicate_entry" | "invalid";
+export type CompositionErrorCode =
+  "not_found" | "duplicate_entry" | "duplicate_title" | "malformed" | "invalid";
 
 export class CompositionError extends Error {
   code: CompositionErrorCode;
@@ -22,21 +21,76 @@ export class CompositionError extends Error {
   }
 }
 
-// ownerId is optional so the sample-resume seed can compose a resume for a user
-// who isn't the caller (the backfill route seeds every account). Request-scoped
-// callers omit it and get the signed-in user, as before.
+export function validateCompositionSections(
+  input: unknown,
+): CompositionSectionInput[] {
+  if (!Array.isArray(input)) {
+    throw new CompositionError("sections must be an array", "malformed");
+  }
+
+  const sections: CompositionSectionInput[] = [];
+  const seenTitles = new Set<string>();
+  const seenEntryIds = new Set<string>();
+  for (const raw of input) {
+    if (!raw || typeof raw !== "object") {
+      throw new CompositionError("each section needs a title", "malformed");
+    }
+    const section = raw as Record<string, unknown>;
+    if (typeof section.title !== "string" || !section.title.trim()) {
+      throw new CompositionError("each section needs a title", "malformed");
+    }
+    if (
+      !Array.isArray(section.entries) ||
+      !section.entries.every((entry) => typeof entry === "string")
+    ) {
+      throw new CompositionError(
+        "section entries must be an array of ids",
+        "malformed",
+      );
+    }
+
+    const title = section.title.trim();
+    if (seenTitles.has(title)) {
+      throw new CompositionError(
+        "section titles must be unique within a resume",
+        "duplicate_title",
+      );
+    }
+    seenTitles.add(title);
+
+    const entries = section.entries as string[];
+    for (const entryId of entries) {
+      if (!isUuid(entryId)) {
+        throw new CompositionError("entry ids must be UUIDs", "malformed");
+      }
+      if (seenEntryIds.has(entryId)) {
+        throw new CompositionError(
+          "an entry can only appear once in a resume",
+          "duplicate_entry",
+        );
+      }
+      seenEntryIds.add(entryId);
+    }
+    sections.push({ title, entries });
+  }
+  return sections;
+}
+
+// Seed jobs may target an owner other than the current session.
 export async function setResumeComposition(
   resumeId: string,
   sections: CompositionSectionInput[],
   explicitOwnerId?: string,
+  explicitClient?: ServiceClient,
 ): Promise<void> {
-  const client = createServiceClient();
+  const validatedSections = validateCompositionSections(sections);
+  const client = explicitClient ?? createServiceClient();
   const ownerId = explicitOwnerId ?? (await getOwnerId());
 
   const { error } = await client.rpc("set_resume_composition", {
     p_resume_id: resumeId,
     p_owner_id: ownerId,
-    p_sections: sections,
+    p_sections: validatedSections,
   });
 
   if (!error) return;
@@ -58,6 +112,7 @@ export async function setResumeComposition(
 
 export function compositionErrorStatus(code: CompositionErrorCode): number {
   if (code === "not_found") return 404;
-  if (code === "duplicate_entry") return 409;
+  if (code === "duplicate_entry" || code === "duplicate_title") return 409;
+  if (code === "malformed") return 400;
   return 422;
 }

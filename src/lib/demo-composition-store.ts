@@ -1,44 +1,66 @@
-import type { EditorSection } from "@/components/outline/outline-pane";
-import { getDemoWorkspace } from "@/lib/sample-resume/demo-workspace";
+import type { EditorSection } from "@/lib/editor-composition";
+import type { BankEntryRow } from "@/lib/rows";
 
-// Carries the anonymous playground's outline across the desktop <-> editor
-// route boundary (/ and /resume/demo are separate pages, so React state
-// alone doesn't survive the navigation). sessionStorage, not localStorage:
-// the arrangement is disposable by design and shouldn't outlive the tab.
-// Every access is wrapped, since a private window or blocked site data
-// throws rather than returning null.
-
+// The demo outline crosses page navigation but remains disposable per tab.
 const STORAGE_KEY = "modular-demo-composition";
 
-// A stale value from a previous fixture or type shape can outlive the tab
-// this store was written for, so entries are checked against the current
-// fixture's known ids rather than trusted as-is.
 function isValidSection(
   section: unknown,
-  knownEntryIds: Set<string>,
+  entryById: Map<string, BankEntryRow>,
+  seenTitles: Set<string>,
+  seenEntryIds: Set<string>,
 ): section is EditorSection {
   if (typeof section !== "object" || section === null) return false;
   const { title, entries } = section as Record<string, unknown>;
-  return (
-    typeof title === "string" &&
-    Array.isArray(entries) &&
-    entries.every((id) => typeof id === "string" && knownEntryIds.has(id))
-  );
+  if (
+    typeof title !== "string" ||
+    !title.trim() ||
+    !Array.isArray(entries) ||
+    entries.length === 0
+  ) {
+    return false;
+  }
+  const normalizedTitle = title.trim().toLowerCase();
+  if (seenTitles.has(normalizedTitle)) return false;
+  seenTitles.add(normalizedTitle);
+
+  for (const id of entries) {
+    if (typeof id !== "string" || seenEntryIds.has(id)) return false;
+    const entry = entryById.get(id);
+    if (!entry) return false;
+    if (entry.source_section.trim().toLowerCase() !== normalizedTitle) {
+      return false;
+    }
+    if (
+      (entry.kind === "header_chunk" || entry.kind === "section_chunk") &&
+      entries.length > 1
+    ) {
+      return false;
+    }
+    seenEntryIds.add(id);
+  }
+  return true;
 }
 
-export function loadDemoComposition(): EditorSection[] | null {
+export function loadDemoComposition(
+  entries: BankEntryRow[],
+): EditorSection[] | null {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
-    const knownEntryIds = new Set(
-      getDemoWorkspace().entries.map((entry) => entry.id),
-    );
-    const sections = parsed.filter((section) =>
-      isValidSection(section, knownEntryIds),
-    );
-    return sections.length > 0 ? sections : null;
+    const entryById = new Map(entries.map((entry) => [entry.id, entry]));
+    const seenTitles = new Set<string>();
+    const seenEntryIds = new Set<string>();
+    if (
+      !parsed.every((section) =>
+        isValidSection(section, entryById, seenTitles, seenEntryIds),
+      )
+    ) {
+      return null;
+    }
+    return parsed.length > 0 ? parsed : null;
   } catch {
     return null;
   }
@@ -48,6 +70,6 @@ export function saveDemoComposition(sections: EditorSection[]): void {
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(sections));
   } catch {
-    // Best-effort only. The arrangement just won't survive navigation.
+    // Storage may be unavailable in private or restricted browser contexts.
   }
 }

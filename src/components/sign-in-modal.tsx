@@ -8,11 +8,6 @@ import {
 } from "@/components/ui/dialog";
 import { useGoogleSignIn } from "@/lib/use-google-sign-in";
 
-// The standard four-color Google "G" mark, matching every other
-// Sign in with Google button on the web. Google's branding guidelines
-// (developers.google.com/identity/branding-guidelines) require the logo
-// verbatim, not restyled, so this SVG is fixed and shouldn't be recolored
-// or resized independently of the button around it.
 function GoogleGIcon() {
   return (
     <svg viewBox="0 0 48 48" className="size-6" aria-hidden="true">
@@ -41,10 +36,6 @@ function GoogleGIcon() {
   );
 }
 
-// Google's "Neutral" theme (same source as the icon note above): #F2F2F2
-// fill, no stroke, #1F1F1F medium-weight text. Not built on the shared
-// Button primitive, since that spec is fixed regardless of this app's own
-// button variants.
 function GoogleSignInButton({
   onClick,
   pending,
@@ -64,10 +55,6 @@ function GoogleSignInButton({
   );
 }
 
-// Shown wherever the anonymous playground gates an action that needs an
-// account (see src/lib/sample-resume/demo-workspace.ts). A modal instead of
-// navigating to /login, so quitting just closes it instead of leaving the
-// page, and opening it costs nothing (no route change, no server fetch).
 export function SignInModal({
   open,
   onOpenChange,

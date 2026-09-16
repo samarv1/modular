@@ -1,22 +1,17 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
 import { getAdapterOrThrow } from "@/lib/get-adapter-or-throw";
 import { loadCompileComposition } from "@/lib/compile-composition-query";
 import { compileLatexInSandbox } from "@/lib/sandbox-compile";
 import { getSignedUrl, uploadArchive } from "@/lib/storage";
 import { resumeDownloadFilename } from "@/lib/resume-filename";
 import { isUuid, throwDbError } from "@/lib/api-request";
+import { getOwnerContext } from "@/lib/request-context";
+import { deleteArtifactSafely } from "@/lib/artifact-lifecycle";
+import { asRow } from "@/lib/db";
 
-// Synchronous compile: awaits the whole Sandbox round trip (up to ~150s,
-// see PASS_TIMEOUT_MS in sandbox-compile.ts) and returns the final status in
-// this response — no separate worker/queue needed. maxDuration is set
-// explicitly below rather than relying on the platform default, which
-// varies by plan and isn't guaranteed to cover a full compile. Every write
-// after the sandbox call is guarded by .eq("last_compile_request_id",
-// requestId) so a newer compile that started meanwhile silently wins
-// (PLAN.md's latest-request-wins rule) instead of this one clobbering it.
+// The route timeout must cover the synchronous sandbox compile.
+// Request-id guards prevent stale compiles from overwriting newer results.
 export const maxDuration = 180;
 
 export async function POST(
@@ -28,7 +23,8 @@ export async function POST(
     return NextResponse.json({ error: "resume not found" }, { status: 404 });
   }
 
-  const loaded = await loadCompileComposition(id);
+  const context = await getOwnerContext();
+  const loaded = await loadCompileComposition(id, context);
   if (!loaded) {
     return NextResponse.json({ error: "resume not found" }, { status: 404 });
   }
@@ -47,9 +43,10 @@ export async function POST(
   const adapter = getAdapterOrThrow(loaded.adapterId);
   const assembled = adapter.assemble(loaded.composition);
 
-  const ownerId = await getOwnerId();
+  const { ownerId } = context;
   const requestId = randomUUID();
-  const { error: startError } = await ownerScopedTable("resume", ownerId)
+  const { error: startError } = await context
+    .table("resume")
     .update({
       compile_status: "compiling",
       last_compile_request_id: requestId,
@@ -62,17 +59,21 @@ export async function POST(
   try {
     result = await compileLatexInSandbox(assembled.source);
   } catch (err) {
-    // Thrown before/outside pdflatex ever ran (Sandbox boot, missing
-    // TEXLIVE_SNAPSHOT_ID, network) — not a LaTeX log, and not caused by
-    // anything in the user's resume. Tagged with a recognizable prefix so
-    // the UI (src/lib/latex-error.ts) can label it as an environment issue
-    // rather than presenting it as a resume-content error.
+    // The prefix lets the UI distinguish infrastructure failures from LaTeX
+    // content errors.
     const message = err instanceof Error ? err.message : String(err);
     const compileError = `Compile environment error: ${message}`;
-    await ownerScopedTable("resume", ownerId)
+    const { data: failedResume, error: failUpdateError } = await context
+      .table("resume")
       .update({ compile_status: "failed", compile_error: compileError })
       .eq("id", id)
-      .eq("last_compile_request_id", requestId);
+      .eq("last_compile_request_id", requestId)
+      .select("id")
+      .maybeSingle();
+    if (failUpdateError) throwDbError(failUpdateError);
+    if (!failedResume) {
+      return NextResponse.json({ error: "Compile failed." }, { status: 409 });
+    }
     return NextResponse.json(
       { compileStatus: "failed", compileError },
       { status: 500 },
@@ -80,13 +81,20 @@ export async function POST(
   }
 
   if (!result.success || !result.pdf) {
-    await ownerScopedTable("resume", ownerId)
+    const { data: failedResume, error: failUpdateError } = await context
+      .table("resume")
       .update({
         compile_status: "failed",
         compile_error: result.log.slice(-4000),
       })
       .eq("id", id)
-      .eq("last_compile_request_id", requestId);
+      .eq("last_compile_request_id", requestId)
+      .select("id")
+      .maybeSingle();
+    if (failUpdateError) throwDbError(failUpdateError);
+    if (!failedResume) {
+      return NextResponse.json({ error: "Compile failed." }, { status: 409 });
+    }
     return NextResponse.json(
       { compileStatus: "failed", compileError: result.log.slice(-4000) },
       { status: 422 },
@@ -94,12 +102,18 @@ export async function POST(
   }
 
   const pdfPath = `compiled/${ownerId}/${id}/${requestId}.pdf`;
-  await uploadArchive(pdfPath, new Uint8Array(result.pdf), "application/pdf");
+  await uploadArchive(
+    pdfPath,
+    new Uint8Array(result.pdf),
+    "application/pdf",
+    context.client,
+  );
 
   const compileStatus =
     result.pageCount && result.pageCount > 1 ? "blocked_multipage" : "success";
 
-  const { error: finishError } = await ownerScopedTable("resume", ownerId)
+  const { data: finishedResume, error: finishError } = await context
+    .table("resume")
     .update({
       compile_status: compileStatus,
       compile_error: null,
@@ -107,19 +121,59 @@ export async function POST(
       page_count: result.pageCount,
     })
     .eq("id", id)
-    .eq("last_compile_request_id", requestId);
-  if (finishError) throwDbError(finishError);
+    .eq("last_compile_request_id", requestId)
+    .select("id")
+    .maybeSingle();
+  if (finishError) {
+    await deleteArtifactSafely(pdfPath, context.client);
+    throwDbError(finishError);
+  }
+  if (!finishedResume) {
+    await deleteArtifactSafely(pdfPath, context.client);
+    return NextResponse.json({ error: "Compile failed." }, { status: 409 });
+  }
+  if (loaded.pdfArtifactPath !== pdfPath) {
+    await deleteArtifactSafely(loaded.pdfArtifactPath, context.client);
+  }
 
-  // Two signed URLs, not one: the preview iframe needs an inline
-  // (non-attachment) response, while the download button needs
-  // Content-Disposition: attachment — Supabase Storage sets that per-URL via
-  // the `download` option, so a single URL can't serve both.
+  // Supabase sets Content-Disposition per URL, so preview and download need
+  // separate signed URLs.
   const [pdfUrl, pdfDownloadUrl] = await Promise.all([
-    getSignedUrl(pdfPath),
-    getSignedUrl(pdfPath, 3600, {
-      download: resumeDownloadFilename(loaded.title),
-    }),
+    getSignedUrl(pdfPath, 3600, undefined, context.client),
+    getSignedUrl(
+      pdfPath,
+      3600,
+      {
+        download: resumeDownloadFilename(loaded.title),
+      },
+      context.client,
+    ),
   ]);
+
+  const { data: currentCompile, error: currentCompileError } = await context
+    .table("resume")
+    .select("id")
+    .eq("id", id)
+    .eq("last_compile_request_id", requestId)
+    .eq("pdf_artifact_path", pdfPath)
+    .maybeSingle();
+  if (currentCompileError) throwDbError(currentCompileError);
+  if (!currentCompile) {
+    const { data: currentResume, error: currentResumeError } = asRow<{
+      pdf_artifact_path: string | null;
+    }>(
+      await context
+        .table("resume")
+        .select("pdf_artifact_path")
+        .eq("id", id)
+        .maybeSingle(),
+    );
+    if (currentResumeError) throwDbError(currentResumeError);
+    if (!currentResume || currentResume.pdf_artifact_path !== pdfPath) {
+      await deleteArtifactSafely(pdfPath, context.client);
+    }
+    return NextResponse.json({ error: "Compile failed." }, { status: 409 });
+  }
 
   return NextResponse.json({
     compileStatus,

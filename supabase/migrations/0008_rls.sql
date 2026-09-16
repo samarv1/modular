@@ -1,13 +1,5 @@
--- Enables RLS as a defense-in-depth backstop, superseding the "intentionally
--- not enabled" note in 0001_init.sql/0003_folders.sql now that Google SSO
--- gives every request a real auth.uid(). This is a backstop, not the primary
--- enforcement: route handlers keep using the service-role client (which
--- bypasses RLS) + ownerScopedTable()'s explicit .eq('owner_id', ownerId)
--- filtering (src/lib/db.ts) as the actual security boundary, since no
--- browser code ever queries these tables directly. RLS just means a future
--- bug that bypasses ownerScopedTable (e.g. a raw createServiceClient() call
--- with a forgotten filter, or a client that isn't service-role) still can't
--- leak another owner's rows.
+-- Service-role queries bypass RLS, so ownerScopedTable remains the primary
+-- boundary. These policies protect future session and browser clients.
 
 alter table template_shell enable row level security;
 alter table source_resume enable row level security;

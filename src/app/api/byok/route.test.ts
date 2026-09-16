@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 const testOwnerId = process.env.TEST_OWNER_ID!;
 vi.mock("@/lib/owner", () => ({ getOwnerId: async () => testOwnerId }));
+const testClient = {};
+vi.mock("@/lib/request-context", () => ({
+  getOwnerContext: async () => ({
+    ownerId: testOwnerId,
+    client: testClient,
+  }),
+}));
 
 vi.mock("@/lib/resume-extraction", async () => {
   const actual = await vi.importActual<
@@ -16,8 +23,7 @@ vi.mock("@/lib/byok-rate-limit", async () => {
   );
   return {
     ...actual,
-    assertUnderValidateRateLimit: vi.fn().mockResolvedValue(undefined),
-    recordValidateAttempt: vi.fn().mockResolvedValue(undefined),
+    reserveValidateAttempt: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -29,7 +35,7 @@ vi.mock("@/lib/byok-store", () => ({
 
 const { GET, POST, DELETE } = await import("./route");
 const { validateByokKey } = await import("@/lib/resume-extraction");
-const { assertUnderValidateRateLimit, ValidateRateLimitExceededError } =
+const { reserveValidateAttempt, ValidateRateLimitExceededError } =
   await import("@/lib/byok-rate-limit");
 const { hasByokKey, saveByokKey, deleteByokKey } =
   await import("@/lib/byok-store");
@@ -63,7 +69,11 @@ describe("POST /api/byok", () => {
     const res = await POST(jsonRequest({ apiKey: "sk-good" }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ valid: true });
-    expect(saveByokKey).toHaveBeenCalledWith(testOwnerId, "sk-good");
+    expect(saveByokKey).toHaveBeenCalledWith(
+      testOwnerId,
+      "sk-good",
+      testClient,
+    );
   });
 
   it("does not save the key when it's rejected", async () => {
@@ -79,16 +89,16 @@ describe("POST /api/byok", () => {
   });
 
   it("rejects a missing apiKey with 400, without checking the rate limit", async () => {
-    vi.mocked(assertUnderValidateRateLimit).mockClear();
+    vi.mocked(reserveValidateAttempt).mockClear();
     const res = await POST(jsonRequest({}));
     expect(res.status).toBe(400);
-    expect(assertUnderValidateRateLimit).not.toHaveBeenCalled();
+    expect(reserveValidateAttempt).not.toHaveBeenCalled();
   });
 
   it("returns 429 with reason rate_limited once over the limit, without validating or saving", async () => {
     vi.mocked(validateByokKey).mockClear();
     vi.mocked(saveByokKey).mockClear();
-    vi.mocked(assertUnderValidateRateLimit).mockRejectedValueOnce(
+    vi.mocked(reserveValidateAttempt).mockRejectedValueOnce(
       new ValidateRateLimitExceededError(),
     );
     const res = await POST(jsonRequest({ apiKey: "sk-whatever" }));
@@ -108,6 +118,6 @@ describe("DELETE /api/byok", () => {
     const res = await DELETE();
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(deleteByokKey).toHaveBeenCalledWith(testOwnerId);
+    expect(deleteByokKey).toHaveBeenCalledWith(testOwnerId, testClient);
   });
 });

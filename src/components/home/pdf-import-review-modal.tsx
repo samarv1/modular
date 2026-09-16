@@ -15,6 +15,7 @@ import type {
 import type { BankEntryRow } from "@/lib/rows";
 import { ImportErrorMessage } from "@/components/home/import-error-message";
 import { LoadingStatus } from "@/components/home/loading-status";
+import { groupEntriesBySection } from "@/lib/group-by-section";
 
 const LOADING_STEPS = [
   "Reading your resume…",
@@ -58,11 +59,6 @@ function removeEntry(
   return { ...extraction, sections };
 }
 
-// A PDF/markdown-derived import can't be reviewed as raw LaTeX the way a real
-// .tex upload is (see import-review-modal.tsx) — there's no source LaTeX
-// yet, only the LLM's structured extraction, so the review surface here is
-// editable structured fields instead. Rendered by ImportReviewModal inside
-// its shared Dialog shell once the picked file turns out to be a .pdf.
 export function PdfImportBody({
   file,
   onImported,
@@ -193,7 +189,13 @@ export function PdfImportBody({
           }
         />
 
-        {extraction.sections.map((section, sectionIndex) => (
+        {groupEntriesBySection(
+          extraction.sections.map((section, sectionIndex) => ({
+            section,
+            sectionIndex,
+          })),
+          ({ sectionIndex }) => sectionIndex,
+        ).map(({ entries: [{ section, sectionIndex }] }) => (
           <div key={sectionIndex} className="flex flex-col gap-2">
             <input
               value={section.title}

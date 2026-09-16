@@ -1,24 +1,36 @@
-import { asRow, asRows, ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
+import { asRow, asRows } from "@/lib/db";
+import { groupBySectionId } from "@/lib/group-by-section";
+import { getOwnerContext, type OwnerContext } from "@/lib/request-context";
 import type { BankEntryKind, ResumeComposition } from "@/lib/adapters/types";
 
-// Compile-specific composition load: unlike loadResumeComposition (the
-// outline pane's shape, which cross-references bank entries already held
-// client-side), this joins straight through to bank_entry and template_shell
-// so assemble() gets everything the preamble-union rule needs in one call.
-export async function loadCompileComposition(resumeId: string): Promise<{
+// Compilation needs bank entries and the template shell in one consistent load.
+export async function loadCompileComposition(
+  resumeId: string,
+  providedContext?: OwnerContext,
+): Promise<{
   adapterId: string;
   title: string;
+  compileStatus: string;
+  pdfArtifactPath: string | null;
+  latexExportPath: string | null;
+  shellArchivePath: string;
+  shellRootFile: string;
   composition: ResumeComposition;
 } | null> {
-  const ownerId = await getOwnerId();
+  const context = providedContext ?? (await getOwnerContext());
 
   const { data: resume, error: resumeError } = asRow<{
     template_shell_id: string;
     title: string;
+    compile_status: string;
+    pdf_artifact_path: string | null;
+    latex_export_path: string | null;
   }>(
-    await ownerScopedTable("resume", ownerId)
-      .select("template_shell_id, title")
+    await context
+      .table("resume")
+      .select(
+        "template_shell_id, title, compile_status, pdf_artifact_path, latex_export_path",
+      )
       .eq("id", resumeId)
       .maybeSingle(),
   );
@@ -28,27 +40,38 @@ export async function loadCompileComposition(resumeId: string): Promise<{
   const { data: shell, error: shellError } = asRow<{
     adapter_id: string;
     preamble: string;
+    archive_path: string;
+    root_file: string;
   }>(
-    await ownerScopedTable("template_shell", ownerId)
-      .select("adapter_id, preamble")
+    await context
+      .table("template_shell")
+      .select("adapter_id, preamble, archive_path, root_file")
       .eq("id", resume.template_shell_id)
       .maybeSingle(),
   );
   if (shellError) throw new Error(shellError.message);
   if (!shell) return null;
 
+  const [sectionsResult, entriesResult] = await Promise.all([
+    context
+      .table("resume_section")
+      .select("id, title, position")
+      .eq("resume_id", resumeId)
+      .order("position", { ascending: true }),
+    context
+      .table("resume_section_entry")
+      .select(
+        "resume_section_id, position, bank_entry(kind, raw_latex, required_packages)",
+      )
+      .eq("resume_id", resumeId)
+      .order("position", { ascending: true }),
+  ]);
   const { data: sections, error: sectionsError } = asRows<{
     id: string;
     title: string;
     position: number;
-  }>(
-    await ownerScopedTable("resume_section", ownerId)
-      .select("id, title, position")
-      .eq("resume_id", resumeId)
-      .order("position", { ascending: true }),
-  );
+  }>(sectionsResult);
   if (sectionsError) throw new Error(sectionsError.message);
-
   const { data: entries, error: entriesError } = asRows<{
     resume_section_id: string;
     position: number;
@@ -57,22 +80,16 @@ export async function loadCompileComposition(resumeId: string): Promise<{
       raw_latex: string;
       required_packages: string[];
     } | null;
-  }>(
-    await ownerScopedTable("resume_section_entry", ownerId)
-      .select(
-        "resume_section_id, position, bank_entry(kind, raw_latex, required_packages)",
-      )
-      .eq("resume_id", resumeId)
-      .order("position", { ascending: true }),
-  );
+  }>(entriesResult);
   if (entriesError) throw new Error(entriesError.message);
+  const entriesBySection = groupBySectionId(entries ?? []);
 
   const composition: ResumeComposition = {
     shellPreamble: shell.preamble,
     sections: (sections ?? []).map((section) => ({
       title: section.title,
-      entries: (entries ?? [])
-        .filter((e) => e.resume_section_id === section.id && e.bank_entry)
+      entries: (entriesBySection.get(section.id) ?? [])
+        .filter((e) => e.bank_entry)
         .map((e) => ({
           rawLatex: e.bank_entry!.raw_latex,
           kind: e.bank_entry!.kind,
@@ -81,5 +98,14 @@ export async function loadCompileComposition(resumeId: string): Promise<{
     })),
   };
 
-  return { adapterId: shell.adapter_id, title: resume.title, composition };
+  return {
+    adapterId: shell.adapter_id,
+    title: resume.title,
+    compileStatus: resume.compile_status,
+    pdfArtifactPath: resume.pdf_artifact_path,
+    latexExportPath: resume.latex_export_path,
+    shellArchivePath: shell.archive_path,
+    shellRootFile: shell.root_file,
+    composition,
+  };
 }

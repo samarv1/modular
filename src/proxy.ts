@@ -5,15 +5,8 @@ import { hasStaleSupabaseSessionCookie } from "@/lib/returning-user-cookie";
 
 // Refreshes the session cookie on every request (Supabase's documented
 // Next.js pattern — the access token is short-lived, this is what keeps it
-// current) and gates access: unauthenticated page requests redirect to
-// /login, unauthenticated /api/* requests get a 401 JSON body instead of a
-// redirect (a redirect doesn't mean anything to a fetch() call).
-//
-// Two paths are let through without a session instead: "/" and
-// "/resume/${DEMO_RESUME_ID}" render an anonymous playground (a copy of
-// Jake's Resume held in memory, see demo-workspace.ts) rather than
-// redirecting. Everywhere else, a route handler can still assume a session
-// is guaranteed by the time it runs, see src/lib/owner.ts.
+// current) and gates access. The desktop and demo resume remain public for
+// first-time visitors, while API routes still require a session.
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
@@ -46,20 +39,15 @@ export async function proxy(request: NextRequest) {
     if (request.nextUrl.pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
-
-    // A returning user whose session died still carries a stale Supabase
-    // auth cookie. Send them to /login instead of the playground, or a
-    // desktop holding one unfamiliar resume reads as their data having
-    // vanished. See returning-user-cookie.ts for what this actually keys on.
-    const isPublicPath =
+    const isPlaygroundPath =
       request.nextUrl.pathname === "/" ||
       request.nextUrl.pathname === `/resume/${DEMO_RESUME_ID}`;
     if (
-      isPublicPath &&
+      isPlaygroundPath &&
       !hasStaleSupabaseSessionCookie(request.cookies.getAll())
-    )
+    ) {
       return response;
-
+    }
     const loginUrl = new URL("/login", request.url);
     return NextResponse.redirect(loginUrl);
   }

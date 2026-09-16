@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
+import { asRow } from "@/lib/db";
 import { loadResumeComposition } from "@/lib/resume-composition-query";
 import { dedupedName } from "@/lib/unique-db-name";
 import {
@@ -8,6 +7,7 @@ import {
   mutationErrorStatus,
   readJsonObject,
   throwDbError,
+  isUuid,
 } from "@/lib/api-request";
 import {
   integerFieldError,
@@ -16,20 +16,22 @@ import {
 import { deleteOwnedRow } from "@/lib/delete-owned-row";
 import { getSignedUrl } from "@/lib/storage";
 import { resumeDownloadFilename } from "@/lib/resume-filename";
+import { getOwnerContext } from "@/lib/request-context";
+import { deleteArtifactSafely } from "@/lib/artifact-lifecycle";
 
 export type { ResumeSectionRow } from "@/lib/resume-composition-query";
 
-// Full composition for the outline pane. Entry *display* data (name, tags,
-// source_section) isn't joined in here — the bank pane already loaded every
-// bank_entry for this owner, so the outline cross-references by id from that
-// in-memory list instead of duplicating the join.
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "resume not found" }, { status: 404 });
+  }
 
-  const composition = await loadResumeComposition(id);
+  const context = await getOwnerContext();
+  const composition = await loadResumeComposition(id, context);
   if (!composition) {
     return NextResponse.json({ error: "resume not found" }, { status: 404 });
   }
@@ -37,25 +39,29 @@ export async function GET(
   const pdfPath = composition.resume.pdf_artifact_path;
   const [pdfUrl, pdfDownloadUrl] = pdfPath
     ? await Promise.all([
-        getSignedUrl(pdfPath),
-        getSignedUrl(pdfPath, 3600, {
-          download: resumeDownloadFilename(composition.resume.title),
-        }),
+        getSignedUrl(pdfPath, 3600, undefined, context.client),
+        getSignedUrl(
+          pdfPath,
+          3600,
+          {
+            download: resumeDownloadFilename(composition.resume.title),
+          },
+          context.client,
+        ),
       ])
     : [null, null];
 
   return NextResponse.json({ ...composition, pdfUrl, pdfDownloadUrl });
 }
 
-// Title rename, and (Phase 6) desktop placement — folder_id/position_x/
-// position_y for the home page's free-drag canvas. Each field is optional
-// and independent, unlike the old title-only guard: a drag-end position
-// save shouldn't need to resend the title, and vice versa.
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "resume not found" }, { status: 404 });
+  }
   const body = await readJsonObject(request);
   if (!body) {
     return NextResponse.json(
@@ -65,28 +71,43 @@ export async function PATCH(
   }
 
   const values: Record<string, unknown> = {};
+  let desiredTitle: string | undefined;
   if (typeof body.title === "string") {
-    const desiredTitle = body.title.trim();
+    desiredTitle = body.title.trim();
     if (!desiredTitle) {
       return NextResponse.json(
         { error: "title cannot be empty" },
         { status: 400 },
       );
     }
-    values.title = await dedupedName("resume", "title", desiredTitle, {
-      excludeId: id,
-    });
   }
   const fieldError =
     integerFieldError(body, ["positionX", "positionY"]) ??
     nullableStringFieldError(body, "folderId");
   if (fieldError) return fieldError;
-  const ownerId = await getOwnerId();
+  if (typeof body.folderId === "string" && !isUuid(body.folderId)) {
+    return NextResponse.json({ error: "folder not found" }, { status: 422 });
+  }
+  if (
+    desiredTitle === undefined &&
+    typeof body.positionX !== "number" &&
+    typeof body.positionY !== "number" &&
+    body.folderId !== null &&
+    typeof body.folderId !== "string"
+  ) {
+    return NextResponse.json({ error: "nothing to update" }, { status: 400 });
+  }
+  const context = await getOwnerContext();
+  if (desiredTitle !== undefined) {
+    values.title = await dedupedName("resume", "title", desiredTitle, {
+      excludeId: id,
+      ownerId: context.ownerId,
+      client: context.client,
+    });
+  }
   if (typeof body.folderId === "string") {
-    const { data: folder, error: folderError } = await ownerScopedTable(
-      "resume_folder",
-      ownerId,
-    )
+    const { data: folder, error: folderError } = await context
+      .table("resume_folder")
       .select("id")
       .eq("id", body.folderId)
       .maybeSingle();
@@ -104,7 +125,8 @@ export async function PATCH(
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   }
 
-  const { data, error } = await ownerScopedTable("resume", ownerId)
+  const { data, error } = await context
+    .table("resume")
     .update(values)
     .eq("id", id)
     .select("id, title, folder_id, position_x, position_y")
@@ -119,13 +141,41 @@ export async function PATCH(
   return NextResponse.json({ resume: data });
 }
 
-// resume_section/resume_section_entry are ON DELETE CASCADE off resume_id
-// (0001_init.sql) — deleting a build cleans up its own composition rows.
-// bank_entry is untouched (it only references source_resume, not resume).
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  return deleteOwnedRow("resume", id, "resume not found");
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "resume not found" }, { status: 404 });
+  }
+  const context = await getOwnerContext();
+  const { data: resume, error } = asRow<{
+    pdf_artifact_path: string | null;
+    latex_export_path: string | null;
+  }>(
+    await context
+      .table("resume")
+      .select("pdf_artifact_path, latex_export_path")
+      .eq("id", id)
+      .maybeSingle(),
+  );
+  if (error) throwDbError(error);
+  if (!resume) {
+    return NextResponse.json({ error: "resume not found" }, { status: 404 });
+  }
+  const response = await deleteOwnedRow(
+    "resume",
+    id,
+    "resume not found",
+    undefined,
+    context,
+  );
+  if (response.status === 204) {
+    await Promise.all([
+      deleteArtifactSafely(resume.pdf_artifact_path, context.client),
+      deleteArtifactSafely(resume.latex_export_path, context.client),
+    ]);
+  }
+  return response;
 }

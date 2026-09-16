@@ -1,26 +1,22 @@
 import { NextResponse } from "next/server";
-import { asRow, asRows, ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
-import {
-  CompositionError,
-  compositionErrorStatus,
-  setResumeComposition,
-} from "@/lib/composition";
+import { asRow, asRows } from "@/lib/db";
 import { dedupedName } from "@/lib/unique-db-name";
-import { readJsonObject, throwDbError } from "@/lib/api-request";
+import { isUuid, readJsonObject, throwDbError } from "@/lib/api-request";
 import {
   integerFieldError,
   nullableStringFieldError,
 } from "@/lib/field-validation";
 import type { ResumeRow } from "@/lib/rows";
+import { getOwnerContext, type OwnerContext } from "@/lib/request-context";
 
 async function ownerHasFolder(
-  ownerId: string,
+  context: OwnerContext,
   folderId: string | null | undefined,
 ): Promise<boolean> {
   if (folderId === null || folderId === undefined) return true;
   const { data, error } = asRow<{ id: string }>(
-    await ownerScopedTable("resume_folder", ownerId)
+    await context
+      .table("resume_folder")
       .select("id")
       .eq("id", folderId)
       .maybeSingle(),
@@ -29,12 +25,11 @@ async function ownerHasFolder(
   return data !== null;
 }
 
-// Ordered by creation, not last-edited — tabs stay put as you work instead
-// of reshuffling every time an autosave lands, the same way browser tabs do.
 export async function GET() {
-  const ownerId = await getOwnerId();
+  const context = await getOwnerContext();
   const { data, error } = asRows<ResumeRow>(
-    await ownerScopedTable("resume", ownerId)
+    await context
+      .table("resume")
       .select(
         "id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at",
       )
@@ -44,10 +39,6 @@ export async function GET() {
   return NextResponse.json({ resumes: data ?? [] });
 }
 
-// Create blank or duplicate (PLAN.md: "users can also start blank or
-// duplicate a build"). Blank picks the caller's templateShellId, or falls
-// back to the owner's most recently created shell if omitted — there's no
-// shell picker UI yet, and in practice one owner has had one shell so far.
 export async function POST(request: Request) {
   const body = await readJsonObject(request);
   if (!body) {
@@ -60,8 +51,6 @@ export async function POST(request: Request) {
     typeof body.title === "string" && body.title.trim()
       ? body.title.trim()
       : "Untitled resume";
-  const title = await dedupedName("resume", "title", desiredTitle);
-
   const fieldError =
     integerFieldError(body, ["positionX", "positionY"]) ??
     nullableStringFieldError(body, "folderId");
@@ -70,19 +59,34 @@ export async function POST(request: Request) {
     typeof body.positionX !== "number" ||
     typeof body.positionY !== "number"
   ) {
-    // Every caller (Desktop's "New resume", the empty-bank shell) computes an
-    // occupancy-checked position before POSTing — a missing one means the
-    // caller has a bug, not that (0,0) is a reasonable fallback. (0,0) sits
-    // on top of the desktop's first icon, so silently defaulting to it here
-    // used to produce icons stacked on top of each other.
+    // Defaulting to (0,0) would overlap the first desktop icon.
     return NextResponse.json(
       { error: "positionX and positionY are required" },
       { status: 400 },
     );
   }
+  if (typeof body.folderId === "string" && !isUuid(body.folderId)) {
+    return NextResponse.json({ error: "folder not found" }, { status: 422 });
+  }
+  if (
+    typeof body.duplicateFromResumeId === "string" &&
+    !isUuid(body.duplicateFromResumeId)
+  ) {
+    return NextResponse.json(
+      { error: "resume to duplicate not found" },
+      { status: 404 },
+    );
+  }
+  if (
+    typeof body.templateShellId === "string" &&
+    !isUuid(body.templateShellId)
+  ) {
+    return NextResponse.json(
+      { error: "template shell not found" },
+      { status: 422 },
+    );
+  }
 
-  // Desktop placement (Phase 6) — the caller (Desktop's "New resume") computes
-  // where the icon should land, and which folder (if any) it should land in.
   const position = {
     positionX: body.positionX,
     positionY: body.positionY,
@@ -92,17 +96,21 @@ export async function POST(request: Request) {
         : undefined,
   };
 
-  const ownerId = await getOwnerId();
+  const context = await getOwnerContext();
+  const title = await dedupedName("resume", "title", desiredTitle, {
+    ownerId: context.ownerId,
+    client: context.client,
+  });
   if (typeof body.duplicateFromResumeId === "string") {
     return duplicateResume(
-      ownerId,
+      context,
       body.duplicateFromResumeId,
       title,
       position,
     );
   }
   return createBlankResume(
-    ownerId,
+    context,
     typeof body.templateShellId === "string" ? body.templateShellId : undefined,
     title,
     position,
@@ -110,7 +118,7 @@ export async function POST(request: Request) {
 }
 
 async function createBlankResume(
-  ownerId: string,
+  context: OwnerContext,
   templateShellId: string | undefined,
   title: string,
   position: {
@@ -119,19 +127,17 @@ async function createBlankResume(
     folderId?: string | null;
   },
 ) {
-  if (!(await ownerHasFolder(ownerId, position.folderId))) {
+  if (!(await ownerHasFolder(context, position.folderId))) {
     return NextResponse.json({ error: "folder not found" }, { status: 422 });
   }
 
-  // A template shell outlives the bank resumes that created it (deleting a
-  // bank resume never deletes its shell), so shell existence alone isn't
-  // proof there's anything to build a blank resume from. Require at least
-  // one successfully imported bank resume, same check GET /api/source-resumes
-  // uses for the Bank pane's own empty state.
+  // Shells can outlive their source resumes, so a shell alone does not make
+  // the bank usable.
   const { data: sourceResume, error: sourceResumeError } = asRow<{
     id: string;
   }>(
-    await ownerScopedTable("source_resume", ownerId)
+    await context
+      .table("source_resume")
       .select("id")
       .eq("import_status", "success")
       .limit(1)
@@ -148,7 +154,8 @@ async function createBlankResume(
   let shellId = templateShellId;
   if (shellId) {
     const { data: shell, error: shellError } = asRow<{ id: string }>(
-      await ownerScopedTable("template_shell", ownerId)
+      await context
+        .table("template_shell")
         .select("id")
         .eq("id", shellId)
         .maybeSingle(),
@@ -162,7 +169,8 @@ async function createBlankResume(
     }
   } else {
     const { data: shell, error: shellError } = asRow<{ id: string }>(
-      await ownerScopedTable("template_shell", ownerId)
+      await context
+        .table("template_shell")
         .select("id")
         .order("created_at", { ascending: false })
         .limit(1)
@@ -179,7 +187,8 @@ async function createBlankResume(
   }
 
   const { data, error } = asRow<ResumeRow>(
-    await ownerScopedTable("resume", ownerId)
+    await context
+      .table("resume")
       .insert({
         title,
         template_shell_id: shellId,
@@ -203,7 +212,7 @@ async function createBlankResume(
 }
 
 async function duplicateResume(
-  ownerId: string,
+  context: OwnerContext,
   sourceResumeId: string,
   title: string,
   position: {
@@ -212,98 +221,29 @@ async function duplicateResume(
     folderId?: string | null;
   },
 ) {
-  if (!(await ownerHasFolder(ownerId, position.folderId))) {
-    return NextResponse.json({ error: "folder not found" }, { status: 422 });
-  }
-
-  const { data: source, error: sourceError } = asRow<{
-    id: string;
-    template_shell_id: string;
-  }>(
-    await ownerScopedTable("resume", ownerId)
-      .select("id, template_shell_id")
-      .eq("id", sourceResumeId)
-      .maybeSingle(),
-  );
-  if (sourceError) throwDbError(sourceError);
-  if (!source) {
-    return NextResponse.json(
-      { error: "resume to duplicate not found" },
-      { status: 404 },
-    );
-  }
-
-  const { data: sections, error: sectionsError } = asRows<{
-    id: string;
-    title: string;
-    position: number;
-  }>(
-    await ownerScopedTable("resume_section", ownerId)
-      .select("id, title, position")
-      .eq("resume_id", sourceResumeId)
-      .order("position", { ascending: true }),
-  );
-  if (sectionsError) throwDbError(sectionsError);
-
-  const { data: sectionEntries, error: entriesError } = asRows<{
-    resume_section_id: string;
-    bank_entry_id: string;
-    position: number;
-  }>(
-    await ownerScopedTable("resume_section_entry", ownerId)
-      .select("resume_section_id, bank_entry_id, position")
-      .eq("resume_id", sourceResumeId)
-      .order("position", { ascending: true }),
-  );
-  if (entriesError) throwDbError(entriesError);
-
-  const { data: newResume, error: createError } = asRow<ResumeRow>(
-    await ownerScopedTable("resume", ownerId)
-      .insert({
-        title,
-        template_shell_id: source.template_shell_id,
-        ...(position.positionX !== undefined
-          ? { position_x: position.positionX }
-          : {}),
-        ...(position.positionY !== undefined
-          ? { position_y: position.positionY }
-          : {}),
-        ...(position.folderId !== undefined
-          ? { folder_id: position.folderId }
-          : {}),
+  const { data, error } = asRow<ResumeRow>(
+    await context.client
+      .rpc("duplicate_resume", {
+        p_owner_id: context.ownerId,
+        p_source_resume_id: sourceResumeId,
+        p_title: title,
+        p_folder_id: position.folderId ?? null,
+        p_position_x: position.positionX ?? 0,
+        p_position_y: position.positionY ?? 0,
       })
-      .select(
-        "id, title, template_shell_id, compile_status, folder_id, position_x, position_y, updated_at, created_at",
-      )
       .single(),
   );
-  if (createError) throwDbError(createError);
-
-  const compositionSections = (sections ?? []).map((section) => ({
-    title: section.title,
-    entries: (sectionEntries ?? [])
-      .filter((e) => e.resume_section_id === section.id)
-      .map((e) => e.bank_entry_id),
-  }));
-
-  try {
-    await setResumeComposition(newResume!.id, compositionSections);
-  } catch (err) {
-    await ownerScopedTable("resume", ownerId)
-      .delete()
-      .eq("id", newResume!.id)
-      .then(
-        () => undefined,
-        () => undefined,
-      );
-    if (err instanceof CompositionError) {
+  if (error) {
+    if (error.code === "P0002") {
       return NextResponse.json(
-        { error: err.message },
-        { status: compositionErrorStatus(err.code) },
+        { error: "resume to duplicate not found" },
+        { status: 404 },
       );
     }
-    throw err;
+    if (error.code === "P0001") {
+      return NextResponse.json({ error: "folder not found" }, { status: 422 });
+    }
+    throwDbError(error);
   }
-
-  return NextResponse.json({ resume: newResume }, { status: 201 });
+  return NextResponse.json({ resume: data }, { status: 201 });
 }

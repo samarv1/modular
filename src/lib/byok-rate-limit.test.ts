@@ -9,14 +9,13 @@ import {
 } from "vitest";
 import { createServiceClient } from "@/lib/supabase/server";
 import {
-  assertUnderValidateRateLimit,
-  recordValidateAttempt,
+  reserveValidateAttempt,
   VALIDATE_HOURLY_LIMIT,
   ValidateRateLimitExceededError,
 } from "@/lib/byok-rate-limit";
 
-// Hits the live Supabase project (same convention as src/lib/ai-usage.test.ts):
-// TEST_OWNER_ID must be a real signed-in user's id.
+// Runs only through `npm run test:integration`. TEST_OWNER_ID must belong to
+// the dedicated Supabase test project configured through TEST_SUPABASE_*.
 const testOwnerId = process.env.TEST_OWNER_ID!;
 const client = createServiceClient();
 
@@ -31,7 +30,7 @@ async function readCount(hourBucket: string): Promise<number> {
   return (data as { count: number } | null)?.count ?? 0;
 }
 
-describe("assertUnderValidateRateLimit / recordValidateAttempt", () => {
+describe("reserveValidateAttempt", () => {
   // Pin the clock to an hour fabricated for this file, so it owns its row
   // outright rather than racing other test files' real-current-hour writes.
   const hourBucket = "2097-03-01T05";
@@ -59,11 +58,8 @@ describe("assertUnderValidateRateLimit / recordValidateAttempt", () => {
       );
   });
 
-  it("passes when under the limit and increments on record", async () => {
-    await expect(
-      assertUnderValidateRateLimit(testOwnerId),
-    ).resolves.toBeUndefined();
-    await recordValidateAttempt(testOwnerId);
+  it("reserves a slot when under the limit", async () => {
+    await expect(reserveValidateAttempt(testOwnerId)).resolves.toBeUndefined();
     expect(await readCount(hourBucket)).toBe(1);
   });
 
@@ -76,8 +72,26 @@ describe("assertUnderValidateRateLimit / recordValidateAttempt", () => {
       },
       { onConflict: "owner_id,hour_bucket" },
     );
-    await expect(
-      assertUnderValidateRateLimit(testOwnerId),
-    ).rejects.toBeInstanceOf(ValidateRateLimitExceededError);
+    await expect(reserveValidateAttempt(testOwnerId)).rejects.toBeInstanceOf(
+      ValidateRateLimitExceededError,
+    );
+  });
+
+  it("never lets concurrent reservations exceed the limit", async () => {
+    await client.from("byok_validate_usage").upsert(
+      {
+        owner_id: testOwnerId,
+        hour_bucket: hourBucket,
+        count: VALIDATE_HOURLY_LIMIT - 2,
+      },
+      { onConflict: "owner_id,hour_bucket" },
+    );
+    const results = await Promise.allSettled(
+      Array.from({ length: 5 }, () => reserveValidateAttempt(testOwnerId)),
+    );
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(2);
+    expect(await readCount(hourBucket)).toBe(VALIDATE_HOURLY_LIMIT);
   });
 });

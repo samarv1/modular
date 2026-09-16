@@ -1,19 +1,14 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { asRow, ownerScopedTable } from "@/lib/db";
-import { getOwnerId } from "@/lib/owner";
 import { getAdapterOrThrow } from "@/lib/get-adapter-or-throw";
 import { loadCompileComposition } from "@/lib/compile-composition-query";
 import { buildExportArchive } from "@/lib/latex-export";
 import { downloadArchive, getSignedUrl, uploadArchive } from "@/lib/storage";
 import { resumeDownloadFilename } from "@/lib/resume-filename";
 import { isUuid, throwDbError } from "@/lib/api-request";
+import { getOwnerContext } from "@/lib/request-context";
+import { deleteArtifactSafely } from "@/lib/artifact-lifecycle";
 
-// LaTeX ZIP export (PLAN.md Phase 8). PDF download already exists as a side
-// effect of compile (see compile/route.ts) — this only produces the source
-// archive, gated to builds that last compiled to exactly one page. Reuses
-// the resume's *current* composition (not the possibly-stale last-compiled
-// PDF), the same way compile/route.ts always assembles fresh.
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -23,69 +18,76 @@ export async function GET(
     return NextResponse.json({ error: "resume not found" }, { status: 404 });
   }
 
-  const ownerId = await getOwnerId();
-  const { data: resumeRow, error: resumeError } = asRow<{
-    compile_status: string;
-    template_shell_id: string;
-  }>(
-    await ownerScopedTable("resume", ownerId)
-      .select("compile_status, template_shell_id")
-      .eq("id", id)
-      .maybeSingle(),
-  );
-  if (resumeError) throwDbError(resumeError);
-  if (!resumeRow) {
+  const context = await getOwnerContext();
+  const loaded = await loadCompileComposition(id, context);
+  if (!loaded) {
     return NextResponse.json({ error: "resume not found" }, { status: 404 });
   }
-  if (resumeRow.compile_status !== "success") {
+  if (loaded.compileStatus !== "success") {
     return NextResponse.json(
       { error: "compile this resume to one page before exporting" },
       { status: 422 },
     );
   }
-
-  const { data: shellRow, error: shellError } = asRow<{
-    archive_path: string;
-    root_file: string;
-  }>(
-    await ownerScopedTable("template_shell", ownerId)
-      .select("archive_path, root_file")
-      .eq("id", resumeRow.template_shell_id)
-      .maybeSingle(),
-  );
-  if (shellError) throwDbError(shellError);
-  if (!shellRow) {
-    return NextResponse.json(
-      { error: "template shell not found" },
-      { status: 404 },
-    );
-  }
-
-  const loaded = await loadCompileComposition(id);
-  if (!loaded) {
-    return NextResponse.json({ error: "resume not found" }, { status: 404 });
-  }
   const adapter = getAdapterOrThrow(loaded.adapterId);
   const assembled = adapter.assemble(loaded.composition);
 
-  const originalZip = await downloadArchive(shellRow.archive_path);
+  const originalZip = await downloadArchive(
+    loaded.shellArchivePath,
+    context.client,
+  );
   const exportZip = await buildExportArchive(
     originalZip,
-    shellRow.root_file,
+    loaded.shellRootFile,
     assembled.source,
   );
 
+  const { ownerId } = context;
   const zipPath = `exports/${ownerId}/${id}/${randomUUID()}.zip`;
-  await uploadArchive(zipPath, exportZip, "application/zip");
+  await uploadArchive(zipPath, exportZip, "application/zip", context.client);
 
-  const { error: updateError } = await ownerScopedTable("resume", ownerId)
+  let update = context
+    .table("resume")
     .update({ latex_export_path: zipPath })
     .eq("id", id);
-  if (updateError) throwDbError(updateError as { message: string });
+  update = loaded.latexExportPath
+    ? update.eq("latex_export_path", loaded.latexExportPath)
+    : update.is("latex_export_path", null);
+  const { data: updatedResume, error: updateError } = await update
+    .select("id")
+    .maybeSingle();
+  if (updateError) {
+    await deleteArtifactSafely(zipPath, context.client);
+    throwDbError(updateError as { message: string });
+  }
+  if (!updatedResume) {
+    await deleteArtifactSafely(zipPath, context.client);
+    return NextResponse.json({ error: "Export failed." }, { status: 409 });
+  }
+  if (loaded.latexExportPath !== zipPath) {
+    await deleteArtifactSafely(loaded.latexExportPath, context.client);
+  }
 
-  const zipDownloadUrl = await getSignedUrl(zipPath, 3600, {
-    download: resumeDownloadFilename(loaded.title, "zip"),
-  });
+  const zipDownloadUrl = await getSignedUrl(
+    zipPath,
+    3600,
+    {
+      download: resumeDownloadFilename(loaded.title, "zip"),
+    },
+    context.client,
+  );
+
+  const { data: currentExport, error: currentExportError } = await context
+    .table("resume")
+    .select("id")
+    .eq("id", id)
+    .eq("latex_export_path", zipPath)
+    .maybeSingle();
+  if (currentExportError) throwDbError(currentExportError);
+  if (!currentExport) {
+    await deleteArtifactSafely(zipPath, context.client);
+    return NextResponse.json({ error: "Export failed." }, { status: 409 });
+  }
 
   return NextResponse.json({ zipDownloadUrl });
 }

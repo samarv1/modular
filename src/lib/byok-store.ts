@@ -1,15 +1,13 @@
 import { createServiceClient } from "@/lib/supabase/server";
+import type { ServiceClient } from "@/lib/db";
 
-// Server-side encrypted key storage (supabase/migrations/0011_byok_keys.sql,
-// Supabase Vault). The key never round-trips back to the client after
-// saving. hasByokKey is what the settings page uses to show "configured",
-// and getByokKey is only ever called server-side, at import time.
+// Supabase Vault keys must never cross the server boundary after saving.
 
 export async function saveByokKey(
   ownerId: string,
   apiKey: string,
+  client: ServiceClient = createServiceClient(),
 ): Promise<void> {
-  const client = createServiceClient();
   const { error } = await client.rpc("upsert_byok_key", {
     p_owner_id: ownerId,
     p_api_key: apiKey,
@@ -17,8 +15,10 @@ export async function saveByokKey(
   if (error) throw new Error(error.message);
 }
 
-export async function getByokKey(ownerId: string): Promise<string | null> {
-  const client = createServiceClient();
+export async function getByokKey(
+  ownerId: string,
+  client: ServiceClient = createServiceClient(),
+): Promise<string | null> {
   const { data, error } = await client.rpc("get_byok_key", {
     p_owner_id: ownerId,
   });
@@ -26,8 +26,10 @@ export async function getByokKey(ownerId: string): Promise<string | null> {
   return (data as string | null) ?? null;
 }
 
-export async function hasByokKey(ownerId: string): Promise<boolean> {
-  const client = createServiceClient();
+export async function hasByokKey(
+  ownerId: string,
+  client: ServiceClient = createServiceClient(),
+): Promise<boolean> {
   const { data, error } = await client
     .from("byok_keys")
     .select("owner_id")
@@ -37,8 +39,10 @@ export async function hasByokKey(ownerId: string): Promise<boolean> {
   return data !== null;
 }
 
-export async function deleteByokKey(ownerId: string): Promise<void> {
-  const client = createServiceClient();
+export async function deleteByokKey(
+  ownerId: string,
+  client: ServiceClient = createServiceClient(),
+): Promise<void> {
   const { error } = await client.rpc("delete_byok_key", {
     p_owner_id: ownerId,
   });
