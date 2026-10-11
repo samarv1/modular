@@ -5,7 +5,7 @@ import {
   type ResumeExtraction,
 } from "./resume-extraction-schema";
 
-const GEMINI_MODEL_ID = "gemini-3.5-flash";
+const GEMINI_MODEL_ID = "gemini-3.6-flash";
 
 // Direct Google provider rather than the Vercel AI Gateway: the Gateway
 // requires a card on file on the Vercel team before it'll serve any model
